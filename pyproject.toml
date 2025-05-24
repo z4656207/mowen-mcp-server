@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mowen-mcp-server"
+version = "0.1.0"
+description = "墨问笔记API的MCP服务器封装，支持在Cursor、Claude Desktop等MCP客户端中操作墨问笔记"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "江湖中人", email = "huanghuai315@sina.com"}
+]
+maintainers = [
+    {name = "江湖中人", email = "huanghuai315@sina.com"}
+]
+keywords = ["mcp", "mowen", "墨问", "note", "api", "cursor", "claude"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Communications",
+    "Topic :: Office/Business",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "mcp>=0.1.0",
+    "httpx>=0.25.0",
+    "pydantic>=2.0.0",
+    "nest-asyncio>=1.5.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/z4656207/mowen-mcp-server"
+"Documentation" = "https://github.com/z4656207/mowen-mcp-server#readme"
+"Repository" = "https://github.com/z4656207/mowen-mcp-server.git"
+"Bug Tracker" = "https://github.com/z4656207/mowen-mcp-server/issues"
+"墨问API文档" = "https://mowen.apifox.cn/"
+
+[project.scripts]
+mowen-mcp-server = "mowen_mcp_server.server:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mowen_mcp_server"] 
