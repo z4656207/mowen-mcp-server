@@ -12,12 +12,13 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 from urllib.parse import urljoin
 import nest_asyncio
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel, Field
 
 # 允许嵌套事件循环
 nest_asyncio.apply()
@@ -28,6 +29,18 @@ logger = logging.getLogger("mowen-mcp-server")
 
 # 创建FastMCP服务器实例
 mcp = FastMCP("墨问笔记MCP服务器")
+
+# 添加Pydantic模型来定义参数结构
+class TextNode(BaseModel):
+    """文本节点模型"""
+    text: str = Field(description="文本内容")
+    bold: bool = Field(default=False, description="是否加粗")
+    highlight: bool = Field(default=False, description="是否高亮")
+    link: Optional[str] = Field(default=None, description="链接URL（可选）")
+
+class ParagraphNode(BaseModel):
+    """段落节点模型"""
+    texts: List[TextNode] = Field(description="段落中的文本节点列表")
 
 class MowenAPI:
     """墨问API客户端类，封装所有API调用"""
@@ -181,8 +194,28 @@ def run_async_safely(coro):
         return asyncio.run(coro)
 
 @mcp.tool()
-def create_note(content: str, auto_publish: bool = False, tags: List[str] = None) -> str:
-    """创建一篇新的墨问笔记"""
+def create_note(
+    content: str = Field(description="笔记的文本内容，支持多行文本"),
+    auto_publish: bool = Field(default=False, description="是否自动发布笔记。True表示立即发布，False表示保存为草稿"),
+    tags: Optional[List[str]] = Field(default=None, description="笔记标签列表，例如：['工作', '学习', '重要']")
+) -> str:
+    """
+    创建一篇新的墨问笔记
+    
+    这个工具用于创建简单的文本笔记。如果需要富文本格式（加粗、高亮、链接等），请使用 create_rich_note 工具。
+    
+    使用场景：
+    - 快速记录想法或备忘录
+    - 创建简单的文本笔记
+    - 保存会议记录或学习笔记
+    
+    示例调用：
+    create_note(
+        content="今天学习了Python编程，重点是异步编程概念",
+        auto_publish=True,
+        tags=["学习", "Python", "编程"]
+    )
+    """
     if mowen_api is None:
         return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
     
@@ -218,10 +251,93 @@ def create_note(content: str, auto_publish: bool = False, tags: List[str] = None
         return f"❌ 发生错误: {str(e)}"
 
 @mcp.tool()
-def create_rich_note(paragraphs: List[Dict[str, Any]], auto_publish: bool = False, tags: List[str] = None) -> str:
-    """创建富文本笔记，支持段落格式、加粗、高亮、链接等"""
+def create_rich_note(
+    paragraphs: List[Dict[str, Any]] = Field(
+        description="""
+        富文本段落列表，每个段落包含多个文本节点。
+        
+        格式示例：
+        [
+            {
+                "texts": [
+                    {"text": "这是普通文本"},
+                    {"text": "这是加粗文本", "bold": true},
+                    {"text": "这是高亮文本", "highlight": true},
+                    {"text": "这是链接", "link": "https://example.com"}
+                ]
+            },
+            {
+                "texts": [
+                    {"text": "第二段内容"}
+                ]
+            }
+        ]
+        """
+    ),
+    auto_publish: bool = Field(default=False, description="是否自动发布笔记"),
+    tags: Optional[List[str]] = Field(default=None, description="笔记标签列表")
+) -> str:
+    """
+    创建富文本笔记，支持段落格式、加粗、高亮、链接等高级格式
+    
+    这个工具适用于需要复杂格式的笔记，如：
+    - 包含多个段落的文章
+    - 需要强调重点的内容（加粗、高亮）
+    - 包含外部链接的笔记
+    - 结构化的文档
+    
+    参数说明：
+    - paragraphs: 段落数组，每个段落包含文本节点数组
+    - 每个文本节点可以设置：bold（加粗）、highlight（高亮）、link（链接）
+    
+    示例调用：
+    create_rich_note(
+        paragraphs=[
+            {
+                "texts": [
+                    {"text": "重要提醒：", "bold": true},
+                    {"text": "明天的会议已改期"}
+                ]
+            },
+            {
+                "texts": [
+                    {"text": "详情请查看：", "highlight": true},
+                    {"text": "会议通知", "link": "https://example.com/meeting"}
+                ]
+            }
+        ],
+        auto_publish=true,
+        tags=["会议", "通知"]
+    )
+
+    注意：
+    创建笔记时，尽量一次性传入所有内容，避免创建后再分多次调用edit接口，否则会导致api浪费。
+    """
     if mowen_api is None:
         return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
+    
+    # 添加参数验证
+    if not validate_rich_note_paragraphs(paragraphs):
+        return """❌ 参数格式错误！
+        
+正确的paragraphs格式示例：
+[
+    {
+        "texts": [
+            {"text": "普通文本"},
+            {"text": "加粗文本", "bold": true},
+            {"text": "高亮文本", "highlight": true},
+            {"text": "链接文本", "link": "https://example.com"}
+        ]
+    }
+]
+
+请检查：
+1. 每个段落必须有"texts"字段
+2. 每个文本节点必须有"text"字段
+3. bold和highlight必须是布尔值
+4. link必须是字符串URL
+"""
     
     if tags is None:
         tags = []
@@ -270,8 +386,26 @@ def create_rich_note(paragraphs: List[Dict[str, Any]], auto_publish: bool = Fals
         return f"❌ 发生错误: {str(e)}"
 
 @mcp.tool()
-def edit_note(note_id: str, content: str) -> str:
-    """编辑已存在的笔记内容"""
+def edit_note(
+    note_id: str = Field(description="要编辑的笔记ID，通常是创建笔记时返回的ID"),
+    content: str = Field(description="新的笔记内容，将完全替换原有内容")
+) -> str:
+    """
+    编辑已存在的笔记内容
+    
+    注意：此操作会完全替换笔记的原有内容，而不是追加内容。
+    
+    使用场景：
+    - 修正笔记中的错误
+    - 更新笔记内容
+    - 重写笔记
+    
+    示例调用：
+    edit_note(
+        note_id="note_123456",
+        content="更新后的笔记内容"
+    )
+    """
     if mowen_api is None:
         return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
     
@@ -298,14 +432,178 @@ def edit_note(note_id: str, content: str) -> str:
         return f"❌ 发生错误: {str(e)}"
 
 @mcp.tool()
-def set_note_privacy(note_id: str, privacy_type: str, no_share: bool = False, expire_at: int = 0) -> str:
-    """设置笔记的隐私权限
+def edit_rich_note(
+    note_id: str = Field(description="要编辑的笔记ID，通常是创建笔记时返回的ID"),
+    paragraphs: List[Dict[str, Any]] = Field(
+        description="""
+        富文本段落列表，每个段落包含多个文本节点。将完全替换原有笔记内容。
+        
+        格式示例：
+        [
+            {
+                "texts": [
+                    {"text": "这是普通文本"},
+                    {"text": "这是加粗文本", "bold": true},
+                    {"text": "这是高亮文本", "highlight": true},
+                    {"text": "这是链接", "link": "https://example.com"}
+                ]
+            },
+            {
+                "texts": [
+                    {"text": "第二段内容"}
+                ]
+            }
+        ]
+        """
+    )
+) -> str:
+    """
+    编辑已存在的笔记为富文本格式
     
-    参数:
-    - note_id: 笔记ID
-    - privacy_type: 隐私类型 ('public' - 完全公开, 'private' - 私有, 'rule' - 规则公开)
-    - no_share: 当privacy_type为'rule'时，是否禁止分享
-    - expire_at: 当privacy_type为'rule'时，过期时间戳（0表示永不过期）
+    这个工具用于将现有笔记更新为富文本格式，支持：
+    - 多个段落的结构化内容
+    - 文本格式：加粗、高亮、链接
+    - 完全替换原有内容
+    
+    注意：此操作会完全替换笔记的原有内容，而不是追加内容。
+    
+    使用场景：
+    - 将简单文本笔记升级为富文本格式
+    - 重新组织笔记结构和格式
+    - 添加强调和链接到现有笔记
+    
+    示例调用：
+    edit_rich_note(
+        note_id="note_123456",
+        paragraphs=[
+            {
+                "texts": [
+                    {"text": "更新：", "bold": true},
+                    {"text": "项目进度已完成80%"}
+                ]
+            },
+            {
+                "texts": [
+                    {"text": "详细报告请查看：", "highlight": true},
+                    {"text": "项目文档", "link": "https://example.com/report"}
+                ]
+            }
+        ]
+    )
+    """
+    if mowen_api is None:
+        return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
+    
+    # 添加参数验证
+    if not validate_rich_note_paragraphs(paragraphs):
+        return """❌ 参数格式错误！
+        
+正确的paragraphs格式示例：
+[
+    {
+        "texts": [
+            {"text": "普通文本"},
+            {"text": "加粗文本", "bold": true},
+            {"text": "高亮文本", "highlight": true},
+            {"text": "链接文本", "link": "https://example.com"}
+        ]
+    }
+]
+
+请检查：
+1. 每个段落必须有"texts"字段
+2. 每个文本节点必须有"text"字段
+3. bold和highlight必须是布尔值
+4. link必须是字符串URL
+"""
+    
+    try:
+        paragraphs_built = []
+        for para_data in paragraphs:
+            texts = []
+            for text_data in para_data["texts"]:
+                marks = []
+                if text_data.get("bold"):
+                    marks.append(NoteAtomBuilder.create_bold_mark())
+                if text_data.get("highlight"):
+                    marks.append(NoteAtomBuilder.create_highlight_mark())
+                if text_data.get("link"):
+                    marks.append(NoteAtomBuilder.create_link_mark(text_data["link"]))
+                
+                text_node = NoteAtomBuilder.create_text(
+                    text_data["text"], 
+                    marks if marks else None
+                )
+                texts.append(text_node)
+            
+            paragraphs_built.append(NoteAtomBuilder.create_paragraph(texts))
+        
+        body = NoteAtomBuilder.create_doc(paragraphs_built)
+        
+        # 使用修复的异步运行方式
+        result = run_async_safely(mowen_api.edit_note(note_id, body))
+            
+        return f"✅ 富文本笔记编辑成功！\n\n笔记ID: {result.get('noteId', note_id)}\n段落数: {len(paragraphs_built)}\n内容已完全替换为新的富文本格式"
+    except httpx.HTTPStatusError as e:
+        error_detail = ""
+        try:
+            error_json = e.response.json()
+            error_detail = f"\n错误代码: {error_json.get('code', 'N/A')}\n错误原因: {error_json.get('reason', 'N/A')}\n错误信息: {error_json.get('message', 'N/A')}"
+        except:
+            error_detail = f"\nHTTP状态码: {e.response.status_code}"
+            
+        return f"❌ API调用失败: {str(e)}{error_detail}"
+    except Exception as e:
+        return f"❌ 发生错误: {str(e)}"
+
+@mcp.tool()
+def set_note_privacy(
+    note_id: str = Field(description="笔记ID"),
+    privacy_type: Literal["public", "private", "rule"] = Field(
+        description="""
+        隐私类型：
+        - 'public': 完全公开，任何人都可以访问
+        - 'private': 私有，只有作者可以访问
+        - 'rule': 规则公开，根据自定义规则控制访问
+        """
+    ),
+    no_share: bool = Field(
+        default=False, 
+        description="当privacy_type为'rule'时，是否禁止分享。True表示禁止分享，False表示允许分享"
+    ),
+    expire_at: int = Field(
+        default=0, 
+        description="当privacy_type为'rule'时，过期时间戳（Unix时间戳）。0表示永不过期"
+    )
+) -> str:
+    """
+    设置笔记的隐私权限
+    
+    这个工具用于控制笔记的访问权限，支持三种模式：
+    
+    1. 完全公开（public）：任何人都可以访问
+    2. 私有（private）：只有作者可以访问
+    3. 规则公开（rule）：可以设置分享限制和过期时间
+    
+    使用场景：
+    - 将草稿笔记设为公开
+    - 保护敏感信息设为私有
+    - 临时分享设置过期时间
+    
+    示例调用：
+    # 设为完全公开
+    set_note_privacy(note_id="note_123", privacy_type="public")
+    
+    # 设为私有
+    set_note_privacy(note_id="note_123", privacy_type="private")
+    
+    # 设为规则公开，禁止分享，1小时后过期
+    set_note_privacy(
+        note_id="note_123", 
+        privacy_type="rule", 
+        no_share=True, 
+        expire_at=1703980800
+    )
     """
     if mowen_api is None:
         return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
@@ -352,7 +650,24 @@ def set_note_privacy(note_id: str, privacy_type: str, no_share: bool = False, ex
 
 @mcp.tool()
 def reset_api_key() -> str:
-    """重置墨问API密钥（注意：会使当前密钥失效）"""
+    """
+    重置墨问API密钥
+    
+    ⚠️ 警告：此操作会立即使当前API密钥失效！
+    
+    使用场景：
+    - API密钥泄露需要重置
+    - 定期更换密钥提高安全性
+    - 密钥丢失需要生成新的
+    
+    注意事项：
+    1. 执行后当前密钥立即失效
+    2. 需要立即保存新密钥
+    3. 需要更新所有使用该密钥的应用
+    
+    示例调用：
+    reset_api_key()
+    """
     if mowen_api is None:
         return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
     
@@ -374,6 +689,27 @@ def reset_api_key() -> str:
         return f"❌ API调用失败: {str(e)}{error_detail}"
     except Exception as e:
         return f"❌ 发生错误: {str(e)}"
+
+# 添加参数验证辅助函数
+def validate_rich_note_paragraphs(paragraphs: List[Dict[str, Any]]) -> bool:
+    """验证富文本笔记段落格式"""
+    try:
+        for para in paragraphs:
+            if "texts" not in para:
+                return False
+            for text in para["texts"]:
+                if "text" not in text or not isinstance(text["text"], str):
+                    return False
+                # 验证可选字段
+                if "bold" in text and not isinstance(text["bold"], bool):
+                    return False
+                if "highlight" in text and not isinstance(text["highlight"], bool):
+                    return False
+                if "link" in text and not isinstance(text["link"], str):
+                    return False
+        return True
+    except:
+        return False
 
 def main():
     """主函数：启动MCP服务器"""

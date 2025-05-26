@@ -171,7 +171,6 @@ API-KEY 是调用`墨问 OpenAPI`的私密凭证，**墨问不会明文保存任
 
 ![image.png](https://api.apifox.com/api/v1/projects/6381454/resources/525133/image-preview)
 
-
 # 3. 错误码
 
 ## 错误码结构说明
@@ -222,6 +221,16 @@ API 对接开发时，建议使用 `reason` 字段来做错误适配
 
 # 4. ChangeLog
 
+# [v0.1.2]
+> 2025.05.26
+
+## Changed
+* [API-笔记创建](https://mowen.apifox.cn/295621359e0.md)
+    * 新增参数 `settings.tags`，支持在创建笔记时，设置标签
+
+## Others
+* 支持 CORS
+
 # [v0.1.1]
 > 2025-05-20
 ## New
@@ -229,10 +238,10 @@ API 对接开发时，建议使用 `reason` 字段来做错误适配
 * [API-笔记设置](https://mowen.apifox.cn/298137640e0.md) 
     * 用于设置笔记私密状态
 
-## Change
+## Changed
 
 * [API-笔记创建](https://mowen.apifox.cn/295621359e0.md)
-    * 新增参数 `auto_publish（自动发表）`，支持在创建笔记后的自动公开发表（风控后）
+    * 新增参数 `settings.auto_publish（自动发表）`，支持在创建笔记后的自动公开发表（风控后）
 
 ---
 # [v0.1.0]
@@ -247,8 +256,7 @@ API 对接开发时，建议使用 `reason` 字段来做错误适配
 
 * [API-APIKey重置](https://mowen.apifox.cn/297614056e0.md)
     * 用于重置 API KEY
-
-
+  
 
 # APIKey 重置
 
@@ -382,7 +390,6 @@ security: []
 
 ```
 
-
 # 笔记创建
 
 > 笔记创建
@@ -470,7 +477,10 @@ components:
           type: array
           items:
             type: string
-          description: 标签
+          description: |-
+            标签
+             标签列表 <= 10 个
+             标签名长度 <= 30 个字符
       x-apifox-orders:
         - autoPublish
         - tags
@@ -974,3 +984,4 @@ servers: []
 security: []
 
 ```
+
