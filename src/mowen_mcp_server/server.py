@@ -1,11 +1,13 @@
 """
-墨问 API MCP 服务器主文件（修复版）
+墨问 API MCP 服务器主文件
 
 这个服务器封装了墨问笔记软件的API，提供以下功能：
-1. 创建笔记
-2. 编辑笔记  
+1. 创建笔记（统一富文本格式）
+2. 编辑笔记（统一富文本格式）
 3. 设置笔记权限
 4. 重置API密钥
+
+所有笔记操作均使用统一的富文本格式，支持段落、加粗、高亮、链接等格式。
 """
 
 import asyncio
@@ -29,18 +31,6 @@ logger = logging.getLogger("mowen-mcp-server")
 
 # 创建FastMCP服务器实例
 mcp = FastMCP("墨问笔记MCP服务器")
-
-# 添加Pydantic模型来定义参数结构
-class TextNode(BaseModel):
-    """文本节点模型"""
-    text: str = Field(description="文本内容")
-    bold: bool = Field(default=False, description="是否加粗")
-    highlight: bool = Field(default=False, description="是否高亮")
-    link: Optional[str] = Field(default=None, description="链接URL（可选）")
-
-class ParagraphNode(BaseModel):
-    """段落节点模型"""
-    texts: List[TextNode] = Field(description="段落中的文本节点列表")
 
 class MowenAPI:
     """墨问API客户端类，封装所有API调用"""
@@ -195,63 +185,6 @@ def run_async_safely(coro):
 
 @mcp.tool()
 def create_note(
-    content: str = Field(description="笔记的文本内容，支持多行文本"),
-    auto_publish: bool = Field(default=False, description="是否自动发布笔记。True表示立即发布，False表示保存为草稿"),
-    tags: Optional[List[str]] = Field(default=None, description="笔记标签列表，例如：['工作', '学习', '重要']")
-) -> str:
-    """
-    创建一篇新的墨问笔记
-    
-    这个工具用于创建简单的文本笔记。如果需要富文本格式（加粗、高亮、链接等），请使用 create_rich_note 工具。
-    
-    使用场景：
-    - 快速记录想法或备忘录
-    - 创建简单的文本笔记
-    - 保存会议记录或学习笔记
-    
-    示例调用：
-    create_note(
-        content="今天学习了Python编程，重点是异步编程概念",
-        auto_publish=True,
-        tags=["学习", "Python", "编程"]
-    )
-    """
-    if mowen_api is None:
-        return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
-    
-    if tags is None:
-        tags = []
-    
-    try:
-        # 构建简单的NoteAtom结构
-        paragraph = NoteAtomBuilder.create_paragraph([
-            NoteAtomBuilder.create_text(content)
-        ])
-        body = NoteAtomBuilder.create_doc([paragraph])
-        
-        settings = {
-            "autoPublish": auto_publish,
-            "tags": tags
-        }
-        
-        # 使用修复的异步运行方式
-        result = run_async_safely(mowen_api.create_note(body, settings))
-            
-        return f"✅ 笔记创建成功！\n\n笔记ID: {result.get('noteId', 'N/A')}\n内容: {content}\n自动发布: {auto_publish}\n标签: {', '.join(tags)}"
-    except httpx.HTTPStatusError as e:
-        error_detail = ""
-        try:
-            error_json = e.response.json()
-            error_detail = f"\n错误代码: {error_json.get('code', 'N/A')}\n错误原因: {error_json.get('reason', 'N/A')}\n错误信息: {error_json.get('message', 'N/A')}"
-        except:
-            error_detail = f"\nHTTP状态码: {e.response.status_code}"
-            
-        return f"❌ API调用失败: {str(e)}{error_detail}"
-    except Exception as e:
-        return f"❌ 发生错误: {str(e)}"
-
-@mcp.tool()
-def create_rich_note(
     paragraphs: List[Dict[str, Any]] = Field(
         description="""
         富文本段落列表，每个段落包含多个文本节点。
@@ -272,26 +205,49 @@ def create_rich_note(
                 ]
             }
         ]
+        
+        如果只是简单文本，可以这样使用：
+        [
+            {
+                "texts": [
+                    {"text": "这是一段简单的文本内容"}
+                ]
+            }
+        ]
         """
     ),
-    auto_publish: bool = Field(default=False, description="是否自动发布笔记"),
-    tags: Optional[List[str]] = Field(default=None, description="笔记标签列表")
+    auto_publish: bool = Field(default=False, description="是否自动发布笔记。True表示立即发布，False表示保存为草稿"),
+    tags: Optional[List[str]] = Field(default=None, description="笔记标签列表，例如：['工作', '学习', '重要']")
 ) -> str:
     """
-    创建富文本笔记，支持段落格式、加粗、高亮、链接等高级格式
+    创建一篇新的墨问笔记
     
-    这个工具适用于需要复杂格式的笔记，如：
-    - 包含多个段落的文章
-    - 需要强调重点的内容（加粗、高亮）
+    这个工具使用统一的富文本格式来创建笔记，支持：
+    - 多个段落的结构化内容
+    - 文本格式：加粗（bold）、高亮（highlight）、链接（link）
+    - 灵活的内容组织方式
+    
+    使用场景：
+    - 快速记录想法或备忘录
+    - 创建结构化文档
+    - 保存会议记录或学习笔记
     - 包含外部链接的笔记
-    - 结构化的文档
     
-    参数说明：
-    - paragraphs: 段落数组，每个段落包含文本节点数组
-    - 每个文本节点可以设置：bold（加粗）、highlight（高亮）、link（链接）
+    简单文本示例：
+    create_note(
+        paragraphs=[
+            {
+                "texts": [
+                    {"text": "今天学习了Python编程，重点是异步编程概念"}
+                ]
+            }
+        ],
+        auto_publish=True,
+        tags=["学习", "Python", "编程"]
+    )
     
-    示例调用：
-    create_rich_note(
+    富文本示例：
+    create_note(
         paragraphs=[
             {
                 "texts": [
@@ -306,17 +262,17 @@ def create_rich_note(
                 ]
             }
         ],
-        auto_publish=true,
+        auto_publish=True,
         tags=["会议", "通知"]
     )
 
     注意：
-    创建笔记时，尽量一次性传入所有内容，避免创建后再分多次调用edit接口，否则会导致api浪费。
+    创建笔记时，尽量一次性传入所有内容，避免创建后再分多次调用edit接口
     """
     if mowen_api is None:
         return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
     
-    # 添加参数验证
+    # 参数验证
     if not validate_rich_note_paragraphs(paragraphs):
         return """❌ 参数格式错误！
         
@@ -343,6 +299,7 @@ def create_rich_note(
         tags = []
     
     try:
+        # 构建富文本内容
         paragraphs_built = []
         for para_data in paragraphs:
             texts = []
@@ -372,7 +329,7 @@ def create_rich_note(
         # 使用修复的异步运行方式
         result = run_async_safely(mowen_api.create_note(body, settings))
             
-        return f"✅ 富文本笔记创建成功！\n\n笔记ID: {result.get('noteId', 'N/A')}\n段落数: {len(paragraphs_built)}\n自动发布: {auto_publish}\n标签: {', '.join(tags)}"
+        return f"✅ 笔记创建成功！\n\n笔记ID: {result.get('noteId', 'N/A')}\n段落数: {len(paragraphs_built)}\n自动发布: {auto_publish}\n标签: {', '.join(tags)}"
     except httpx.HTTPStatusError as e:
         error_detail = ""
         try:
@@ -387,52 +344,6 @@ def create_rich_note(
 
 @mcp.tool()
 def edit_note(
-    note_id: str = Field(description="要编辑的笔记ID，通常是创建笔记时返回的ID"),
-    content: str = Field(description="新的笔记内容，将完全替换原有内容")
-) -> str:
-    """
-    编辑已存在的笔记内容
-    
-    注意：此操作会完全替换笔记的原有内容，而不是追加内容。
-    
-    使用场景：
-    - 修正笔记中的错误
-    - 更新笔记内容
-    - 重写笔记
-    
-    示例调用：
-    edit_note(
-        note_id="note_123456",
-        content="更新后的笔记内容"
-    )
-    """
-    if mowen_api is None:
-        return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
-    
-    try:
-        paragraph = NoteAtomBuilder.create_paragraph([
-            NoteAtomBuilder.create_text(content)
-        ])
-        body = NoteAtomBuilder.create_doc([paragraph])
-        
-        # 使用修复的异步运行方式
-        result = run_async_safely(mowen_api.edit_note(note_id, body))
-            
-        return f"✅ 笔记编辑成功！\n\n笔记ID: {result.get('noteId', note_id)}\n新内容: {content}"
-    except httpx.HTTPStatusError as e:
-        error_detail = ""
-        try:
-            error_json = e.response.json()
-            error_detail = f"\n错误代码: {error_json.get('code', 'N/A')}\n错误原因: {error_json.get('reason', 'N/A')}\n错误信息: {error_json.get('message', 'N/A')}"
-        except:
-            error_detail = f"\nHTTP状态码: {e.response.status_code}"
-            
-        return f"❌ API调用失败: {str(e)}{error_detail}"
-    except Exception as e:
-        return f"❌ 发生错误: {str(e)}"
-
-@mcp.tool()
-def edit_rich_note(
     note_id: str = Field(description="要编辑的笔记ID，通常是创建笔记时返回的ID"),
     paragraphs: List[Dict[str, Any]] = Field(
         description="""
@@ -454,26 +365,48 @@ def edit_rich_note(
                 ]
             }
         ]
+        
+        如果只是简单文本，可以这样使用：
+        [
+            {
+                "texts": [
+                    {"text": "这是一段简单的文本内容"}
+                ]
+            }
+        ]
         """
     )
 ) -> str:
     """
-    编辑已存在的笔记为富文本格式
+    编辑已存在的笔记内容
     
-    这个工具用于将现有笔记更新为富文本格式，支持：
+    这个工具使用统一的富文本格式来编辑笔记，支持：
     - 多个段落的结构化内容
-    - 文本格式：加粗、高亮、链接
-    - 完全替换原有内容
+    - 文本格式：加粗（bold）、高亮（highlight）、链接（link）
+    - 灵活的内容组织方式
     
     注意：此操作会完全替换笔记的原有内容，而不是追加内容。
     
     使用场景：
+    - 修正笔记中的错误
+    - 更新笔记内容
     - 将简单文本笔记升级为富文本格式
     - 重新组织笔记结构和格式
-    - 添加强调和链接到现有笔记
     
-    示例调用：
-    edit_rich_note(
+    简单文本示例：
+    edit_note(
+        note_id="note_123456",
+        paragraphs=[
+            {
+                "texts": [
+                    {"text": "更新后的笔记内容"}
+                ]
+            }
+        ]
+    )
+    
+    富文本示例：
+    edit_note(
         note_id="note_123456",
         paragraphs=[
             {
@@ -494,7 +427,7 @@ def edit_rich_note(
     if mowen_api is None:
         return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
     
-    # 添加参数验证
+    # 参数验证
     if not validate_rich_note_paragraphs(paragraphs):
         return """❌ 参数格式错误！
         
@@ -518,6 +451,7 @@ def edit_rich_note(
 """
     
     try:
+        # 构建富文本内容
         paragraphs_built = []
         for para_data in paragraphs:
             texts = []
@@ -543,7 +477,7 @@ def edit_rich_note(
         # 使用修复的异步运行方式
         result = run_async_safely(mowen_api.edit_note(note_id, body))
             
-        return f"✅ 富文本笔记编辑成功！\n\n笔记ID: {result.get('noteId', note_id)}\n段落数: {len(paragraphs_built)}\n内容已完全替换为新的富文本格式"
+        return f"✅ 笔记编辑成功！\n\n笔记ID: {result.get('noteId', note_id)}\n段落数: {len(paragraphs_built)}"
     except httpx.HTTPStatusError as e:
         error_detail = ""
         try:
