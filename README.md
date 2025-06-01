@@ -68,7 +68,7 @@ MOWEN_API_KEY=你的墨问API密钥
 
 ```json
 {
-  "mcp.servers": {
+  "mcpServers": {
     "mowen-mcp-server": {
       "command": "python",
       "args": ["-m", "mowen_mcp_server.server"],
@@ -86,7 +86,7 @@ MOWEN_API_KEY=你的墨问API密钥
 
 ```json
 {
-  "mcp.servers": {
+  "mcpServers": {
     "mowen-mcp-server": {
       "command": "python",
       "args": ["绝对路径/mowen-mcp-server/src/mowen_mcp_server/server.py"],
