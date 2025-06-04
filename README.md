@@ -2,13 +2,38 @@
 
 这是一个基于**模型上下文协议（MCP）**的服务器，用于与墨问笔记软件进行交互。通过此服务器，你可以在支持MCP的应用（如Cursor、Claude Desktop等）中直接创建、编辑和管理墨问笔记。
 
-**✨ 最新版本特性：统一的富文本接口设计，所有笔记操作使用一致的参数格式，支持简单文本和丰富格式。**
+**✨ 最新版本特性：统一的富文本接口设计，支持引用段落和内链笔记，所有笔记操作使用一致的参数格式。**
+
+## 🆕 新功能预览 (v1.0.1)
+
+### 📝 引用段落
+```python
+{
+    "type": "quote",
+    "texts": [
+        {"text": "重要提醒：", "bold": true},
+        {"text": "支持富文本格式的引用段落"}
+    ]
+}
+```
+
+### 🔗 内链笔记
+```python
+{
+    "type": "note",
+    "note_id": "VPrWsE_-P0qwrFUOygGs8"
+}
+```
+
+> 📚 查看 [`examples/create_note/demo_new_features.md`](examples/create_note/demo_new_features.md) 了解详细用法
 
 ## 功能特性
 
 - 🔗 **兼容MCP协议**：支持最新的MCP 1.9.1版本
-- 📝 **创建笔记**：统一的富文本格式，支持段落、加粗、高亮、链接等
+- 📝 **创建笔记**：统一的富文本格式，支持段落、加粗、高亮、链接、引用和内链笔记
 - ✏️ **编辑笔记**：统一的富文本格式，完全替换笔记内容
+- 💬 **引用段落**：创建引用文本块，支持富文本格式
+- 🔗 **内链笔记**：引用其他笔记，创建笔记间的关联
 - 🔒 **隐私设置**：设置笔记的公开、私有或规则公开权限
 - 🔄 **密钥管理**：重置API密钥功能
 - 🎨 **统一接口**：所有笔记操作使用一致的富文本参数格式
@@ -112,6 +137,11 @@ MOWEN_API_KEY=你的墨问API密钥
 - `auto_publish` (布尔值，可选)：是否自动发布，默认为false
 - `tags` (字符串数组，可选)：笔记标签列表
 
+**支持的段落类型：**
+1. **普通段落**（默认）：`{"texts": [...]}`
+2. **引用段落**：`{"type": "quote", "texts": [...]}`  
+3. **内链笔记**：`{"type": "note", "note_id": "笔记ID"}`
+
 **段落格式示例：**
 ```json
 [
@@ -122,6 +152,17 @@ MOWEN_API_KEY=你的墨问API密钥
       {"text": "高亮文本", "highlight": true},
       {"text": "链接文本", "link": "https://example.com"}
     ]
+  },
+  {
+    "type": "quote",
+    "texts": [
+      {"text": "这是引用段落"},
+      {"text": "支持富文本", "bold": true}
+    ]
+  },
+  {
+    "type": "note",
+    "note_id": "VPrWsE_-P0qwrFUOygxxx"
   }
 ]
 ```
@@ -144,7 +185,7 @@ MOWEN_API_KEY=你的墨问API密钥
 - `note_id` (字符串，必需)：要编辑的笔记ID
 - `paragraphs` (数组，必需)：富文本段落列表，将完全替换原有内容
 
-**注意：** 此操作会完全替换笔记的原有内容，而不是追加内容
+**注意：** 此操作会完全替换笔记的原有内容，而不是追加内容。支持所有段落类型（普通段落、引用段落、内链笔记）。
 
 ### set_note_privacy
 设置笔记的隐私权限
@@ -201,6 +242,38 @@ create_note(
 )
 ```
 
+### 创建包含引用和内链的复杂笔记
+```python
+# 通过MCP工具调用
+create_note(
+    paragraphs=[
+        {
+            "texts": [
+                {"text": "项目进展报告", "bold": true}
+            ]
+        },
+        {
+            "type": "quote",
+            "texts": [
+                {"text": "本周完成了主要功能开发，", "highlight": true},
+                {"text": "详见技术文档", "link": "https://docs.example.com"}
+            ]
+        },
+        {
+            "type": "note",
+            "note_id": "VPrWsE_-P0qwrFUOygGs8"
+        },
+        {
+            "texts": [
+                {"text": "下周计划：开始测试阶段"}
+            ]
+        }
+    ],
+    auto_publish=True,
+    tags=["项目", "进展", "报告"]
+)
+```
+
 ### 编辑笔记
 ```python
 # 通过MCP工具调用
@@ -214,10 +287,15 @@ edit_note(
             ]
         },
         {
+            "type": "quote",
             "texts": [
                 {"text": "详细报告请查看：", "highlight": true},
                 {"text": "项目文档", "link": "https://example.com/report"}
             ]
+        },
+        {
+            "type": "note",
+            "note_id": "related_note_id"
         }
     ]
 )
@@ -242,8 +320,13 @@ mowen-mcp-server/
 │       ├── __init__.py       # 包初始化
 │       ├── server.py         # MCP服务器主程序
 │       └── config.py         # 配置管理
+├── examples/
+│   ├── test_new_features.py  # 新功能测试脚本
+│   └── create_note/
+│       └── demo_new_features.md  # 新功能使用演示
 ├── pyproject.toml            # 项目配置
 ├── README.md                 # 项目文档
+├── CHANGELOG.md              # 更新日志
 └── 墨问API.md               # 墨问API详细文档
 ```
 
@@ -251,6 +334,7 @@ mowen-mcp-server/
 
 - **墨问 API 在线文档**: [https://mowen.apifox.cn/](https://mowen.apifox.cn/)
 - **本地API文档**: 详细的墨问API文档请参考项目中的 `墨问API.md` 文件
+- **新功能演示**: 查看 `examples/create_note/demo_new_features.md` 了解引用段落和内链笔记的详细用法
 - **MCP协议文档**: [Model Context Protocol](https://modelcontextprotocol.io/)
 
 ## 常见问题
@@ -263,6 +347,12 @@ A: 登录墨问小程序，在设置中找到API密钥管理，需要Pro会员�
 
 ### Q: 能编辑小程序创建的笔记吗？
 A: 目前不支持，只能编辑通过API创建的笔记。
+
+### Q: 如何使用引用段落和内链笔记？
+A: 引用段落使用 `{"type": "quote", "texts": [...]}` 格式，内链笔记使用 `{"type": "note", "note_id": "笔记ID"}` 格式。引用段落支持所有富文本格式（加粗、高亮、链接）。
+
+### Q: 内链笔记的note_id从哪里获取？
+A: note_id是创建笔记时返回的笔记ID，或者是墨问中已存在笔记的ID。注意只能引用通过API创建的笔记。
 
 ### Q: 为什么只有paragraphs参数，没有简单的content参数？
 A: 我们统一了接口设计，使用富文本格式可以支持更丰富的内容。即使是简单文本，也可以很容易地使用paragraphs格式：`[{"texts": [{"text": "你的文本"}]}]`

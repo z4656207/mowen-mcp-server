@@ -91,7 +91,19 @@ API-KEY 是调用`墨问 OpenAPI`的私密凭证，**墨问不会明文保存任
                 "content": [
                     {
                         "type": "text",
-                        "text": "第一段 "
+                        "text": "第一段，普通文本段落"
+                    }
+                ]
+            },
+            {
+                "type": "paragraph"
+            },
+            {
+                "type": "paragraph",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "第二段，富文本段落 "
                     },
                     {
                         "type": "text",
@@ -141,7 +153,7 @@ API-KEY 是调用`墨问 OpenAPI`的私密凭证，**墨问不会明文保存任
                 "content": [
                     {
                         "type": "text",
-                        "text": "第二段 "
+                        "text": "第三段，富文本段落 "
                     },
                     {
                         "type": "text",
@@ -162,14 +174,64 @@ API-KEY 是调用`墨问 OpenAPI`的私密凭证，**墨问不会明文保存任
                         "text": "加粗并高亮的链接"
                     }
                 ]
+            },
+            {
+                "type": "paragraph"
+            },
+            {
+                "type": "quote",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "第四段，引用文本段落"
+                    }
+                ]
+            },
+            {
+                "type": "paragraph"
+            },
+            {
+                "type": "quote",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "第五段，引用文本段落也可以有富文本 "
+                    },
+                    {
+                        "type": "text",
+                        "marks": [
+                            {
+                                "type": "link",
+                                "attrs": {
+                                    "href": "https://bing.com"
+                                }
+                            },
+                            {
+                                "type": "highlight"
+                            },
+                            {
+                                "type": "bold"
+                            }
+                        ],
+                        "text": "加粗并高亮的链接"
+                    }
+                ]
+            },
+            {
+                "type": "paragraph"
+            },
+            {
+                "type": "note",
+                "attrs": {
+                    "uuid": "VPrWsE_-P0qwrFUOygGs8"
+                }
             }
         ]
     }
 }
 ```
 
-
-![image.png](https://api.apifox.com/api/v1/projects/6381454/resources/525133/image-preview)
+![image.png](https://api.apifox.com/api/v1/projects/6381454/resources/530915/image-preview)
 
 # 3. 错误码
 
@@ -221,6 +283,19 @@ API 对接开发时，建议使用 `reason` 字段来做错误适配
 
 # 4. ChangeLog
 
+# [v0.1.3]
+> 2025.06.04
+
+## Changed
+* [API-笔记创建](https://mowen.apifox.cn/295621359e0.md)
+    * 新增笔记节点类型 `quote`，支持在创建笔记时，添加引用
+    * 新增笔记节点类型 `note`，支持在创建笔记时，添加内链笔记
+* [API-笔记编辑](https://mowen.apifox.cn/296486093e0.md)
+    * 新增笔记节点类型 `quote`，支持在创建笔记时，添加引用
+    * 新增笔记节点类型 `note`，支持在创建笔记时，添加内链笔记   
+* [2. NoteAtom 的结构说明](https://mowen.apifox.cn/6682171m0.md)
+    * 丰富了 NoteAtom 的示例说明，增加了 `引用` `内链笔记`的部分
+
 # [v0.1.2]
 > 2025.05.26
 
@@ -256,7 +331,7 @@ API 对接开发时，建议使用 `reason` 字段来做错误适配
 
 * [API-APIKey重置](https://mowen.apifox.cn/297614056e0.md)
     * 用于重置 API KEY
-  
+
 
 # APIKey 重置
 
@@ -390,6 +465,7 @@ security: []
 
 ```
 
+
 # 笔记创建
 
 > 笔记创建
@@ -499,6 +575,8 @@ components:
              * 高亮(marks)： `highlight`
              * 链接(marks)： `link`
              * 加粗(marks)： `bold`
+             * 引用(block)： `quote`
+             * 内链笔记(block)： `note`
         text:
           type: string
           description: |-
@@ -523,6 +601,8 @@ components:
           description: |-
             节点属性： 非必填
              与各种节点配合使用，用于描述属性信息
+             * href: 链接地址，用于 `marks.link` 类型的节点
+             * uuid: 内链笔记的笔记 ID，用于 `note` 类型的节点
           x-apifox-orders: []
           properties: {}
           x-apifox-ignore-properties: []
@@ -691,6 +771,8 @@ components:
              * 高亮(marks)： `highlight`
              * 链接(marks)： `link`
              * 加粗(marks)： `bold`
+             * 引用(block)： `quote`
+             * 内链笔记(block)： `note`
         text:
           type: string
           description: |-
@@ -715,6 +797,8 @@ components:
           description: |-
             节点属性： 非必填
              与各种节点配合使用，用于描述属性信息
+             * href: 链接地址，用于 `marks.link` 类型的节点
+             * uuid: 内链笔记的笔记 ID，用于 `note` 类型的节点
           x-apifox-orders: []
           properties: {}
           x-apifox-ignore-properties: []
@@ -793,6 +877,7 @@ servers: []
 security: []
 
 ```
+
 
 # 笔记设置
 

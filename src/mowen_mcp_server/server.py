@@ -7,7 +7,10 @@
 3. 设置笔记权限
 4. 重置API密钥
 
-所有笔记操作均使用统一的富文本格式，支持段落、加粗、高亮、链接等格式。
+所有笔记操作均使用统一的富文本格式，支持：
+- 普通段落：文本内容和富文本格式（加粗、高亮、链接）
+- 引用段落：用于创建引用文本块
+- 内链笔记：用于引用其他笔记，创建笔记间的关联
 """
 
 import asyncio
@@ -138,6 +141,26 @@ class NoteAtomBuilder:
         }
     
     @staticmethod
+    def create_quote(texts: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """创建引用节点"""
+        if not texts:
+            return {"type": "quote"}
+        return {
+            "type": "quote",
+            "content": texts
+        }
+    
+    @staticmethod
+    def create_note(note_uuid: str) -> Dict[str, Any]:
+        """创建内链笔记节点"""
+        return {
+            "type": "note",
+            "attrs": {
+                "uuid": note_uuid
+            }
+        }
+    
+    @staticmethod
     def create_text(text: str, marks: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """创建文本节点"""
         node = {
@@ -189,6 +212,11 @@ def create_note(
         description="""
         富文本段落列表，每个段落包含多个文本节点。
         
+        段落类型：
+        1. 普通段落（默认）：{"texts": [...]}
+        2. 引用段落：{"type": "quote", "texts": [...]}
+        3. 内链笔记：{"type": "note", "note_id": "笔记ID"}
+        
         格式示例：
         [
             {
@@ -198,6 +226,17 @@ def create_note(
                     {"text": "这是高亮文本", "highlight": true},
                     {"text": "这是链接", "link": "https://example.com"}
                 ]
+            },
+            {
+                "type": "quote",
+                "texts": [
+                    {"text": "这是引用段落"},
+                    {"text": "支持富文本", "bold": true}
+                ]
+            },
+            {
+                "type": "note",
+                "note_id": "VPrWsE_-P0qwrFUOygGs8"
             },
             {
                 "texts": [
@@ -224,7 +263,9 @@ def create_note(
     
     这个工具使用统一的富文本格式来创建笔记，支持：
     - 多个段落的结构化内容
-    - 文本格式：加粗（bold）、高亮（highlight）、链接（link）
+    - 普通段落：文本格式（加粗、高亮、链接）
+    - 引用段落：用于创建引用文本块，支持富文本格式
+    - 内链笔记：引用其他笔记，创建笔记间的关联
     - 灵活的内容组织方式
     
     使用场景：
@@ -256,10 +297,15 @@ def create_note(
                 ]
             },
             {
+                "type": "quote",
                 "texts": [
                     {"text": "详情请查看：", "highlight": true},
                     {"text": "会议通知", "link": "https://example.com/meeting"}
                 ]
+            },
+            {
+                "type": "note",
+                "note_id": "VPrWsE_-P0qwrFUOygGs8"
             }
         ],
         auto_publish=True,
@@ -285,14 +331,26 @@ def create_note(
             {"text": "高亮文本", "highlight": true},
             {"text": "链接文本", "link": "https://example.com"}
         ]
+    },
+    {
+        "type": "quote",
+        "texts": [
+            {"text": "引用段落"}
+        ]
+    },
+    {
+        "type": "note",
+        "note_id": "VPrWsE_-P0qwrFUOygGs8"
     }
 ]
 
 请检查：
-1. 每个段落必须有"texts"字段
-2. 每个文本节点必须有"text"字段
-3. bold和highlight必须是布尔值
-4. link必须是字符串URL
+1. 普通段落和引用段落必须有"texts"字段
+2. 内链笔记段落必须有"note_id"字段
+3. 每个文本节点必须有"text"字段
+4. bold和highlight必须是布尔值
+5. link必须是字符串URL
+6. note_id必须是字符串
 """
     
     if tags is None:
@@ -302,23 +360,36 @@ def create_note(
         # 构建富文本内容
         paragraphs_built = []
         for para_data in paragraphs:
-            texts = []
-            for text_data in para_data["texts"]:
-                marks = []
-                if text_data.get("bold"):
-                    marks.append(NoteAtomBuilder.create_bold_mark())
-                if text_data.get("highlight"):
-                    marks.append(NoteAtomBuilder.create_highlight_mark())
-                if text_data.get("link"):
-                    marks.append(NoteAtomBuilder.create_link_mark(text_data["link"]))
-                
-                text_node = NoteAtomBuilder.create_text(
-                    text_data["text"], 
-                    marks if marks else None
-                )
-                texts.append(text_node)
+            para_type = para_data.get("type", "paragraph")
             
-            paragraphs_built.append(NoteAtomBuilder.create_paragraph(texts))
+            if para_type == "note":
+                # 内链笔记节点
+                note_id = para_data.get("note_id")
+                if not note_id:
+                    raise ValueError("内链笔记节点必须提供note_id参数")
+                paragraphs_built.append(NoteAtomBuilder.create_note(note_id))
+            else:
+                # 文本段落（普通或引用）
+                texts = []
+                for text_data in para_data["texts"]:
+                    marks = []
+                    if text_data.get("bold"):
+                        marks.append(NoteAtomBuilder.create_bold_mark())
+                    if text_data.get("highlight"):
+                        marks.append(NoteAtomBuilder.create_highlight_mark())
+                    if text_data.get("link"):
+                        marks.append(NoteAtomBuilder.create_link_mark(text_data["link"]))
+                    
+                    text_node = NoteAtomBuilder.create_text(
+                        text_data["text"], 
+                        marks if marks else None
+                    )
+                    texts.append(text_node)
+                
+                if para_type == "quote":
+                    paragraphs_built.append(NoteAtomBuilder.create_quote(texts))
+                else:
+                    paragraphs_built.append(NoteAtomBuilder.create_paragraph(texts))
         
         body = NoteAtomBuilder.create_doc(paragraphs_built)
         settings = {
@@ -349,6 +420,11 @@ def edit_note(
         description="""
         富文本段落列表，每个段落包含多个文本节点。将完全替换原有笔记内容。
         
+        段落类型：
+        1. 普通段落（默认）：{"texts": [...]}
+        2. 引用段落：{"type": "quote", "texts": [...]}
+        3. 内链笔记：{"type": "note", "note_id": "笔记ID"}
+        
         格式示例：
         [
             {
@@ -358,6 +434,17 @@ def edit_note(
                     {"text": "这是高亮文本", "highlight": true},
                     {"text": "这是链接", "link": "https://example.com"}
                 ]
+            },
+            {
+                "type": "quote",
+                "texts": [
+                    {"text": "这是引用段落"},
+                    {"text": "支持富文本", "bold": true}
+                ]
+            },
+            {
+                "type": "note",
+                "note_id": "VPrWsE_-P0qwrFUOygGs8"
             },
             {
                 "texts": [
@@ -382,7 +469,9 @@ def edit_note(
     
     这个工具使用统一的富文本格式来编辑笔记，支持：
     - 多个段落的结构化内容
-    - 文本格式：加粗（bold）、高亮（highlight）、链接（link）
+    - 普通段落：文本格式（加粗、高亮、链接）
+    - 引用段落：用于创建引用文本块，支持富文本格式
+    - 内链笔记：引用其他笔记，创建笔记间的关联
     - 灵活的内容组织方式
     
     注意：此操作会完全替换笔记的原有内容，而不是追加内容。
@@ -416,10 +505,15 @@ def edit_note(
                 ]
             },
             {
+                "type": "quote",
                 "texts": [
                     {"text": "详细报告请查看：", "highlight": true},
                     {"text": "项目文档", "link": "https://example.com/report"}
                 ]
+            },
+            {
+                "type": "note",
+                "note_id": "VPrWsE_-P0qwrFUOygGs8"
             }
         ]
     )
@@ -440,37 +534,62 @@ def edit_note(
             {"text": "高亮文本", "highlight": true},
             {"text": "链接文本", "link": "https://example.com"}
         ]
+    },
+    {
+        "type": "quote",
+        "texts": [
+            {"text": "引用段落"}
+        ]
+    },
+    {
+        "type": "note",
+        "note_id": "VPrWsE_-P0qwrFUOygGs8"
     }
 ]
 
 请检查：
-1. 每个段落必须有"texts"字段
-2. 每个文本节点必须有"text"字段
-3. bold和highlight必须是布尔值
-4. link必须是字符串URL
+1. 普通段落和引用段落必须有"texts"字段
+2. 内链笔记段落必须有"note_id"字段
+3. 每个文本节点必须有"text"字段
+4. bold和highlight必须是布尔值
+5. link必须是字符串URL
+6. note_id必须是字符串
 """
     
     try:
         # 构建富文本内容
         paragraphs_built = []
         for para_data in paragraphs:
-            texts = []
-            for text_data in para_data["texts"]:
-                marks = []
-                if text_data.get("bold"):
-                    marks.append(NoteAtomBuilder.create_bold_mark())
-                if text_data.get("highlight"):
-                    marks.append(NoteAtomBuilder.create_highlight_mark())
-                if text_data.get("link"):
-                    marks.append(NoteAtomBuilder.create_link_mark(text_data["link"]))
-                
-                text_node = NoteAtomBuilder.create_text(
-                    text_data["text"], 
-                    marks if marks else None
-                )
-                texts.append(text_node)
+            para_type = para_data.get("type", "paragraph")
             
-            paragraphs_built.append(NoteAtomBuilder.create_paragraph(texts))
+            if para_type == "note":
+                # 内链笔记节点
+                note_id = para_data.get("note_id")
+                if not note_id:
+                    raise ValueError("内链笔记节点必须提供note_id参数")
+                paragraphs_built.append(NoteAtomBuilder.create_note(note_id))
+            else:
+                # 文本段落（普通或引用）
+                texts = []
+                for text_data in para_data["texts"]:
+                    marks = []
+                    if text_data.get("bold"):
+                        marks.append(NoteAtomBuilder.create_bold_mark())
+                    if text_data.get("highlight"):
+                        marks.append(NoteAtomBuilder.create_highlight_mark())
+                    if text_data.get("link"):
+                        marks.append(NoteAtomBuilder.create_link_mark(text_data["link"]))
+                    
+                    text_node = NoteAtomBuilder.create_text(
+                        text_data["text"], 
+                        marks if marks else None
+                    )
+                    texts.append(text_node)
+                
+                if para_type == "quote":
+                    paragraphs_built.append(NoteAtomBuilder.create_quote(texts))
+                else:
+                    paragraphs_built.append(NoteAtomBuilder.create_paragraph(texts))
         
         body = NoteAtomBuilder.create_doc(paragraphs_built)
         
@@ -629,18 +748,26 @@ def validate_rich_note_paragraphs(paragraphs: List[Dict[str, Any]]) -> bool:
     """验证富文本笔记段落格式"""
     try:
         for para in paragraphs:
-            if "texts" not in para:
-                return False
-            for text in para["texts"]:
-                if "text" not in text or not isinstance(text["text"], str):
+            para_type = para.get("type", "paragraph")
+            
+            if para_type == "note":
+                # 内链笔记节点验证
+                if "note_id" not in para or not isinstance(para["note_id"], str):
                     return False
-                # 验证可选字段
-                if "bold" in text and not isinstance(text["bold"], bool):
+            else:
+                # 文本段落验证（普通段落或引用段落）
+                if "texts" not in para:
                     return False
-                if "highlight" in text and not isinstance(text["highlight"], bool):
-                    return False
-                if "link" in text and not isinstance(text["link"], str):
-                    return False
+                for text in para["texts"]:
+                    if "text" not in text or not isinstance(text["text"], str):
+                        return False
+                    # 验证可选字段
+                    if "bold" in text and not isinstance(text["bold"], bool):
+                        return False
+                    if "highlight" in text and not isinstance(text["highlight"], bool):
+                        return False
+                    if "link" in text and not isinstance(text["link"], str):
+                        return False
         return True
     except:
         return False
