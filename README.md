@@ -320,9 +320,7 @@ mowen-mcp-server/
 │       ├── server.py         # MCP服务器主程序
 │       └── config.py         # 配置管理
 ├── examples/
-│   ├── test_new_features.py  # 新功能测试脚本
-│   └── create_note/
-│       └── demo_new_features.md  # 新功能使用演示
+│   └── create_note/          # 创建笔记案例
 ├── pyproject.toml            # 项目配置
 ├── README.md                 # 项目文档
 ├── CHANGELOG.md              # 更新日志
@@ -333,7 +331,6 @@ mowen-mcp-server/
 
 - **墨问 API 在线文档**: [https://mowen.apifox.cn/](https://mowen.apifox.cn/)
 - **本地API文档**: 详细的墨问API文档请参考项目中的 `墨问API.md` 文件
-- **新功能演示**: 查看 `examples/create_note/demo_new_features.md` 了解引用段落和内链笔记的详细用法
 - **MCP协议文档**: [Model Context Protocol](https://modelcontextprotocol.io/)
 
 ## 常见问题
