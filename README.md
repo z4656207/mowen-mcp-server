@@ -25,7 +25,6 @@
 }
 ```
 
-> 📚 查看 [`examples/create_note/demo_new_features.md`](examples/create_note/demo_new_features.md) 了解详细用法
 
 ## 功能特性
 
