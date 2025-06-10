@@ -17,6 +17,9 @@ import asyncio
 import json
 import logging
 import os
+import mimetypes
+import aiofiles
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal
 from urllib.parse import urljoin
 import nest_asyncio
@@ -58,9 +61,18 @@ class MowenAPI:
         payload = {"body": body}
         if settings:
             payload["settings"] = settings
+        
+        # 记录完整的API调用参数
+        import json
+        logger.info(f"📤 墨问API创建笔记请求:")
+        logger.info(f"URL: {url}")
+        logger.info(f"Headers: {self.headers}")
+        logger.info(f"Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
             
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=self.headers, json=payload)
+            logger.info(f"📥 墨问API响应状态: {response.status_code}")
+            logger.info(f"📥 墨问API响应内容: {response.text}")
             response.raise_for_status()
             return response.json()
     
@@ -116,6 +128,72 @@ class MowenAPI:
         
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=self.headers, json={})
+            response.raise_for_status()
+            return response.json()
+    
+    async def get_upload_auth(self, file_type: int, file_name: str) -> Dict[str, Any]:
+        """
+        获取上传授权信息
+        
+        参数:
+        - file_type: 文件类型 (1=图片, 2=音频, 3=PDF)
+        - file_name: 文件名
+        """
+        url = urljoin(self.base_url, "/api/open/api/v1/upload/prepare")
+        payload = {
+            "fileType": file_type,
+            "fileName": file_name
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=self.headers, json=payload)
+            response.raise_for_status()
+            return response.json()
+    
+    async def upload_file_local(self, auth_info: Dict[str, Any], file_path: str) -> Dict[str, Any]:
+        """
+        本地文件上传
+        
+        参数:
+        - auth_info: 上传授权信息
+        - file_path: 本地文件路径
+        """
+        form_info = auth_info["form"]
+        endpoint = form_info["endpoint"]
+        form_data = form_info
+        
+        # 读取文件内容
+        async with aiofiles.open(file_path, 'rb') as f:
+            file_content = await f.read()
+        
+        # 构建multipart/form-data
+        files = {"file": (Path(file_path).name, file_content)}
+        data = {k: v for k, v in form_data.items() if k != "file"}
+        
+        async with httpx.AsyncClient(timeout=300.0) as client:  # 增加超时时间
+            response = await client.post(endpoint, data=data, files=files)
+            response.raise_for_status()
+            return response.json()
+    
+    async def upload_file_url(self, file_type: int, url: str, file_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        远程URL文件上传
+        
+        参数:
+        - file_type: 文件类型 (1=图片, 2=音频, 3=PDF)
+        - url: 文件URL
+        - file_name: 文件名（可选）
+        """
+        api_url = urljoin(self.base_url, "/api/open/api/v1/upload/url")
+        payload = {
+            "fileType": file_type,
+            "url": url
+        }
+        if file_name:
+            payload["fileName"] = file_name
+            
+        async with httpx.AsyncClient(timeout=300.0) as client:  # 增加超时时间
+            response = await client.post(api_url, headers=self.headers, json=payload)
             response.raise_for_status()
             return response.json()
 
@@ -188,9 +266,238 @@ class NoteAtomBuilder:
             "type": "link",
             "attrs": {"href": href}
         }
+    
+    @staticmethod
+    def create_image(file_id: str, alt: str = "", align: str = "center") -> Dict[str, Any]:
+        """创建图片节点"""
+        attrs = {"uuid": file_id}
+        if alt:
+            attrs["alt"] = alt
+        if align:
+            attrs["align"] = align
+        return {
+            "type": "image",
+            "attrs": attrs
+        }
+    
+    @staticmethod  
+    def create_audio(file_id: str, show_note: str = "") -> Dict[str, Any]:
+        """创建音频节点"""
+        attrs = {"audio-uuid": file_id}
+        if show_note:
+            attrs["show-note"] = show_note
+        return {
+            "type": "audio",
+            "attrs": attrs
+        }
+    
+    @staticmethod
+    def create_pdf(file_id: str) -> Dict[str, Any]:
+        """创建PDF节点"""
+        return {
+            "type": "pdf",
+            "attrs": {"uuid": file_id}
+        }
 
 # 全局API客户端变量
 mowen_api: Optional[MowenAPI] = None
+
+def get_mowen_api() -> MowenAPI:
+    """获取或初始化MowenAPI实例"""
+    global mowen_api
+    if mowen_api is None:
+        api_key = os.getenv("MOWEN_API_KEY")
+        if not api_key:
+            raise RuntimeError("未设置API密钥。请先设置MOWEN_API_KEY环境变量。")
+        mowen_api = MowenAPI(api_key)
+    return mowen_api
+
+# 文件类型映射
+FILE_TYPE_MAP = {
+    "image": 1,
+    "audio": 2, 
+    "pdf": 3
+}
+
+# 支持的文件扩展名
+SUPPORTED_EXTENSIONS = {
+    "image": {".gif", ".jpeg", ".jpg", ".png", ".webp"},
+    "audio": {".mp3", ".mp4", ".m4a"},
+    "pdf": {".pdf"}
+}
+
+# 文件大小限制 (字节)
+FILE_SIZE_LIMITS = {
+    "image": 50 * 1024 * 1024,  # 50MB
+    "audio": 200 * 1024 * 1024,  # 200MB
+    "pdf": 100 * 1024 * 1024   # 100MB
+}
+
+def get_file_type_from_extension(file_path: str) -> Optional[str]:
+    """根据文件扩展名判断文件类型"""
+    ext = Path(file_path).suffix.lower()
+    
+    for file_type, extensions in SUPPORTED_EXTENSIONS.items():
+        if ext in extensions:
+            return file_type
+    return None
+
+def validate_file_path(file_path: str) -> tuple[bool, str]:
+    """
+    验证文件路径的安全性和有效性
+    
+    推荐使用绝对路径，因为MCP Server和Client通常运行在不同的工作目录中。
+    
+    返回: (是否有效, 错误信息)
+    """
+    try:
+        path = Path(file_path)
+        
+        # 推荐使用绝对路径
+        if not path.is_absolute():
+            # 尝试解析相对路径，但给出提示
+            path = path.resolve()
+            if not path.exists():
+                return False, f"文件不存在：{file_path}\n💡 建议使用绝对路径，因为MCP Server和Client可能运行在不同目录中。\n   例如：{path}"
+            else:
+                # 相对路径找到了文件，但仍然建议使用绝对路径
+                logger.warning(f"⚠️ 使用了相对路径 '{file_path}'，建议使用绝对路径 '{path}' 以确保可靠性")
+        else:
+            path = path.resolve()
+        
+        # 检查文件是否存在
+        if not path.exists():
+            return False, f"文件不存在：{file_path}"
+        
+        # 检查是否为文件
+        if not path.is_file():
+            return False, f"路径不是文件：{file_path}"
+        
+        # 检查文件类型
+        file_type = get_file_type_from_extension(str(path))
+        if not file_type:
+            supported = ", ".join([f"{ft}({', '.join(exts)})" for ft, exts in SUPPORTED_EXTENSIONS.items()])
+            return False, f"不支持的文件类型。支持的类型：{supported}"
+        
+        # 检查文件大小
+        file_size = path.stat().st_size
+        size_limit = FILE_SIZE_LIMITS[file_type]
+        if file_size > size_limit:
+            size_mb = size_limit // (1024 * 1024)
+            return False, f"文件过大。{file_type}类型文件最大支持{size_mb}MB"
+        
+        return True, ""
+        
+    except Exception as e:
+        return False, f"文件路径验证失败：{str(e)}"
+
+async def process_file_upload(file_info: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    处理文件上传
+    
+    参数:
+    - file_info: 文件信息字典
+    
+    返回: 上传后的文件节点
+    """
+    file_type = file_info["file_type"]
+    source_type = file_info["source_type"] 
+    source_path = file_info["source_path"]
+    metadata = file_info.get("metadata", {})
+    
+    logger.info(f"🔄 开始处理文件上传: {file_type}, {source_type}, {source_path}")
+    
+    # 预先检查API密钥
+    try:
+        get_mowen_api()  # 这会抛出异常如果API密钥未设置
+    except RuntimeError as e:
+        raise ValueError(f"API配置错误：{str(e)}。请设置MOWEN_API_KEY环境变量后重试。")
+    
+    try:
+        if source_type == "local":
+            # 本地文件上传
+            is_valid, error_msg = validate_file_path(source_path)
+            if not is_valid:
+                raise ValueError(error_msg)
+            
+            file_path = Path(source_path)
+            file_name = file_path.name
+            file_type_code = FILE_TYPE_MAP[file_type]
+            
+            # 获取上传授权
+            api_client = get_mowen_api()
+            auth_result = await api_client.get_upload_auth(file_type_code, file_name)
+            
+            # 执行文件上传
+            upload_result = await api_client.upload_file_local(auth_result, source_path)
+            file_id = upload_result["file"]["fileId"]
+            logger.info(f"✅ 文件上传成功，获得文件ID: {file_id}")
+            
+        elif source_type == "url":
+            # 远程URL上传
+            file_type_code = FILE_TYPE_MAP[file_type]
+            file_name = metadata.get("file_name")
+            
+            api_client = get_mowen_api()
+            upload_result = await api_client.upload_file_url(file_type_code, source_path, file_name)
+            file_id = upload_result["file"]["fileId"]
+            
+        else:
+            raise ValueError(f"不支持的上传类型：{source_type}")
+        
+        # 根据文件类型创建相应的节点
+        if file_type == "image":
+            alt = metadata.get("alt", "")
+            align = metadata.get("align", "center")
+            image_node = NoteAtomBuilder.create_image(file_id, alt, align)
+            logger.info(f"🖼️ 创建图片节点: {image_node}")
+            return image_node
+        elif file_type == "audio":
+            show_note = metadata.get("show_note", "")
+            return NoteAtomBuilder.create_audio(file_id, show_note)
+        elif file_type == "pdf":
+            return NoteAtomBuilder.create_pdf(file_id)
+        else:
+            raise ValueError(f"不支持的文件类型：{file_type}")
+            
+    except Exception as e:
+        logger.error(f"文件上传失败: {str(e)}")
+        raise
+
+async def process_paragraphs_with_files(paragraphs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    处理包含文件的段落列表，将文件段落转换为实际的文件节点
+    
+    参数:
+    - paragraphs: 段落列表
+    
+    返回: 处理后的段落列表
+    """
+    processed_paragraphs = []
+    logger.info(f"📝 开始处理段落，总数: {len(paragraphs)}")
+    
+    for i, paragraph in enumerate(paragraphs):
+        if paragraph.get("type") == "file":
+            # 这是一个文件段落，需要上传文件并转换
+            logger.info(f"📁 处理文件段落 {i}: {paragraph}")
+            try:
+                file_node = await process_file_upload(paragraph)
+                processed_paragraphs.append(file_node)
+                logger.info(f"✅ 文件段落 {i} 处理完成，生成节点: {file_node}")
+            except Exception as e:
+                # 文件上传失败，添加错误信息段落
+                logger.error(f"❌ 文件段落 {i} 上传失败: {str(e)}")
+                error_text = f"⚠️ 文件上传失败：{str(e)}"
+                error_paragraph = NoteAtomBuilder.create_paragraph([
+                    NoteAtomBuilder.create_text(error_text, [NoteAtomBuilder.create_highlight_mark()])
+                ])
+                processed_paragraphs.append(error_paragraph)
+        else:
+            # 普通段落，直接添加
+            logger.info(f"📄 处理普通段落 {i}: {paragraph.get('type', 'paragraph')}")
+            processed_paragraphs.append(paragraph)
+    
+    return processed_paragraphs
 
 def run_async_safely(coro):
     """安全地运行异步函数"""
@@ -210,12 +517,13 @@ def run_async_safely(coro):
 def create_note(
     paragraphs: List[Dict[str, Any]] = Field(
         description="""
-        富文本段落列表，每个段落包含多个文本节点。
+        富文本段落列表，每个段落包含多个文本节点。支持文本、引用、内链笔记和文件。
         
         段落类型：
         1. 普通段落（默认）：{"texts": [...]}
         2. 引用段落：{"type": "quote", "texts": [...]}
         3. 内链笔记：{"type": "note", "note_id": "笔记ID"}
+        4. 文件段落：{"type": "file", "file_type": "image|audio|pdf", "source_type": "local|url", "source_path": "路径", "metadata": {...}}
         
         格式示例：
         [
@@ -239,11 +547,45 @@ def create_note(
                 "note_id": "VPrWsE_-P0qwrFUOygGs8"
             },
             {
+                "type": "file",
+                "file_type": "image",
+                "source_type": "local",
+                "source_path": "/path/to/image.jpg",
+                "metadata": {
+                    "alt": "图片描述",
+                    "align": "center"
+                }
+            },
+            {
+                "type": "file",
+                "file_type": "audio",
+                "source_type": "url",
+                "source_path": "https://example.com/audio.mp3",
+                "metadata": {
+                    "show_note": "00:00 开场\\n01:30 主要内容"
+                }
+            },
+            {
                 "texts": [
                     {"text": "第二段内容"}
                 ]
             }
         ]
+        
+        支持的文件类型：
+        - 图片(image): .gif, .jpeg, .jpg, .png, .webp (最大50MB)
+        - 音频(audio): .mp3, .mp4, .m4a (最大200MB)
+        - PDF(pdf): .pdf (最大100MB)
+        
+        文件metadata说明：
+        - 图片: alt(描述), align(对齐: left|center|right)
+        - 音频: show_note(ShowNote内容)
+        - PDF: 无需额外metadata
+        
+        ⚠️ 重要提示 - 文件路径要求：
+        - 必须使用绝对路径，且保证路径完全正确
+        - Windows示例: "C:\\Users\\用户名\\Documents\\image.jpg"
+        - macOS/Linux示例: "/Users/用户名/Documents/image.jpg"
         
         如果只是简单文本，可以这样使用：
         [
@@ -315,8 +657,10 @@ def create_note(
     注意：
     创建笔记时，尽量一次性传入所有内容，避免创建后再分多次调用edit接口
     """
-    if mowen_api is None:
-        return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
+    try:
+        api_client = get_mowen_api()
+    except RuntimeError as e:
+        return f"错误：{str(e)}"
     
     # 参数验证
     if not validate_rich_note_paragraphs(paragraphs):
@@ -357,9 +701,14 @@ def create_note(
         tags = []
     
     try:
+        # 先处理包含文件的段落，进行文件上传
+        logger.info(f"🚀 开始创建笔记，原始段落数: {len(paragraphs)}")
+        processed_paragraphs = run_async_safely(process_paragraphs_with_files(paragraphs))
+        logger.info(f"📋 文件处理完成，处理后段落数: {len(processed_paragraphs)}")
+        
         # 构建富文本内容
         paragraphs_built = []
-        for para_data in paragraphs:
+        for para_data in processed_paragraphs:
             para_type = para_data.get("type", "paragraph")
             
             if para_type == "note":
@@ -368,7 +717,10 @@ def create_note(
                 if not note_id:
                     raise ValueError("内链笔记节点必须提供note_id参数")
                 paragraphs_built.append(NoteAtomBuilder.create_note(note_id))
-            else:
+            elif para_type in ["image", "audio", "pdf"]:
+                # 文件节点（已经通过process_paragraphs_with_files处理过）
+                paragraphs_built.append(para_data)
+            elif "texts" in para_data:
                 # 文本段落（普通或引用）
                 texts = []
                 for text_data in para_data["texts"]:
@@ -390,6 +742,9 @@ def create_note(
                     paragraphs_built.append(NoteAtomBuilder.create_quote(texts))
                 else:
                     paragraphs_built.append(NoteAtomBuilder.create_paragraph(texts))
+            else:
+                # 其他类型的段落，可能是处理后的文件节点等，直接跳过或记录错误
+                logger.warning(f"未知段落类型: {para_data}")
         
         body = NoteAtomBuilder.create_doc(paragraphs_built)
         settings = {
@@ -397,8 +752,21 @@ def create_note(
             "tags": tags
         }
         
+        # 记录最终发送给墨问的完整数据结构
+        import json
+        logger.info(f"🏗️ 最终构建的笔记结构:")
+        logger.info(f"Body: {json.dumps(body, indent=2, ensure_ascii=False)}")
+        logger.info(f"Settings: {json.dumps(settings, indent=2, ensure_ascii=False)}")
+        
+        # 详细记录每个阶段的段落数
+        logger.info(f"📊 段落处理统计:")
+        logger.info(f"  - 原始输入段落数: {len(paragraphs)}")
+        logger.info(f"  - 文件处理后段落数: {len(processed_paragraphs)}")
+        logger.info(f"  - 最终构建段落数: {len(paragraphs_built)}")
+        logger.info(f"  - 每个构建段落的类型: {[p.get('type', 'unknown') for p in paragraphs_built]}")
+        
         # 使用修复的异步运行方式
-        result = run_async_safely(mowen_api.create_note(body, settings))
+        result = run_async_safely(api_client.create_note(body, settings))
             
         return f"✅ 笔记创建成功！\n\n笔记ID: {result.get('noteId', 'N/A')}\n段落数: {len(paragraphs_built)}\n自动发布: {auto_publish}\n标签: {', '.join(tags)}"
     except httpx.HTTPStatusError as e:
@@ -411,19 +779,23 @@ def create_note(
             
         return f"❌ API调用失败: {str(e)}{error_detail}"
     except Exception as e:
-        return f"❌ 发生错误: {str(e)}"
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"创建笔记时发生错误: {str(e)}\n堆栈跟踪: {tb}")
+        return f"❌ 发生错误: {str(e)}\n\n调试信息:\n{tb}"
 
 @mcp.tool()
 def edit_note(
     note_id: str = Field(description="要编辑的笔记ID，通常是创建笔记时返回的ID"),
     paragraphs: List[Dict[str, Any]] = Field(
         description="""
-        富文本段落列表，每个段落包含多个文本节点。将完全替换原有笔记内容。
+        富文本段落列表，每个段落包含多个文本节点。将完全替换原有笔记内容。支持文本、引用、内链笔记和文件。
         
         段落类型：
         1. 普通段落（默认）：{"texts": [...]}
         2. 引用段落：{"type": "quote", "texts": [...]}
         3. 内链笔记：{"type": "note", "note_id": "笔记ID"}
+        4. 文件段落：{"type": "file", "file_type": "image|audio|pdf", "source_type": "local|url", "source_path": "路径", "metadata": {...}}
         
         格式示例：
         [
@@ -447,11 +819,31 @@ def edit_note(
                 "note_id": "VPrWsE_-P0qwrFUOygGs8"
             },
             {
+                "type": "file",
+                "file_type": "image",
+                "source_type": "local",
+                "source_path": "/path/to/image.jpg",
+                "metadata": {
+                    "alt": "图片描述",
+                    "align": "center"
+                }
+            },
+            {
                 "texts": [
                     {"text": "第二段内容"}
                 ]
             }
         ]
+        
+        支持的文件类型：
+        - 图片(image): .gif, .jpeg, .jpg, .png, .webp (最大50MB)
+        - 音频(audio): .mp3, .mp4, .m4a (最大200MB)
+        - PDF(pdf): .pdf (最大100MB)
+        
+        文件metadata说明：
+        - 图片: alt(描述), align(对齐: left|center|right)
+        - 音频: show_note(ShowNote内容)
+        - PDF: 无需额外metadata
         
         如果只是简单文本，可以这样使用：
         [
@@ -518,8 +910,10 @@ def edit_note(
         ]
     )
     """
-    if mowen_api is None:
-        return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
+    try:
+        api_client = get_mowen_api()
+    except RuntimeError as e:
+        return f"错误：{str(e)}"
     
     # 参数验证
     if not validate_rich_note_paragraphs(paragraphs):
@@ -557,9 +951,12 @@ def edit_note(
 """
     
     try:
+        # 先处理包含文件的段落，进行文件上传
+        processed_paragraphs = run_async_safely(process_paragraphs_with_files(paragraphs))
+        
         # 构建富文本内容
         paragraphs_built = []
-        for para_data in paragraphs:
+        for para_data in processed_paragraphs:
             para_type = para_data.get("type", "paragraph")
             
             if para_type == "note":
@@ -568,7 +965,10 @@ def edit_note(
                 if not note_id:
                     raise ValueError("内链笔记节点必须提供note_id参数")
                 paragraphs_built.append(NoteAtomBuilder.create_note(note_id))
-            else:
+            elif para_type in ["image", "audio", "pdf"]:
+                # 文件节点（已经通过process_paragraphs_with_files处理过）
+                paragraphs_built.append(para_data)
+            elif "texts" in para_data:
                 # 文本段落（普通或引用）
                 texts = []
                 for text_data in para_data["texts"]:
@@ -590,11 +990,14 @@ def edit_note(
                     paragraphs_built.append(NoteAtomBuilder.create_quote(texts))
                 else:
                     paragraphs_built.append(NoteAtomBuilder.create_paragraph(texts))
+            else:
+                # 其他类型的段落，可能是处理后的文件节点等，直接跳过或记录错误
+                logger.warning(f"未知段落类型: {para_data}")
         
         body = NoteAtomBuilder.create_doc(paragraphs_built)
         
         # 使用修复的异步运行方式
-        result = run_async_safely(mowen_api.edit_note(note_id, body))
+        result = run_async_safely(api_client.edit_note(note_id, body))
             
         return f"✅ 笔记编辑成功！\n\n笔记ID: {result.get('noteId', note_id)}\n段落数: {len(paragraphs_built)}"
     except httpx.HTTPStatusError as e:
@@ -608,6 +1011,7 @@ def edit_note(
         return f"❌ API调用失败: {str(e)}{error_detail}"
     except Exception as e:
         return f"❌ 发生错误: {str(e)}"
+
 
 @mcp.tool()
 def set_note_privacy(
@@ -658,8 +1062,10 @@ def set_note_privacy(
         expire_at=1703980800
     )
     """
-    if mowen_api is None:
-        return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
+    try:
+        api_client = get_mowen_api()
+    except RuntimeError as e:
+        return f"错误：{str(e)}"
     
     try:
         rule = None
@@ -670,7 +1076,7 @@ def set_note_privacy(
             }
         
         # 使用修复的异步运行方式
-        result = run_async_safely(mowen_api.set_note_privacy(note_id, privacy_type, rule))
+        result = run_async_safely(api_client.set_note_privacy(note_id, privacy_type, rule))
         
         privacy_desc = {
             "public": "完全公开",
@@ -721,12 +1127,14 @@ def reset_api_key() -> str:
     示例调用：
     reset_api_key()
     """
-    if mowen_api is None:
-        return "错误：未设置API密钥。请先设置MOWEN_API_KEY环境变量。"
+    try:
+        api_client = get_mowen_api()
+    except RuntimeError as e:
+        return f"错误：{str(e)}"
     
     try:
         # 使用修复的异步运行方式
-        result = run_async_safely(mowen_api.reset_api_key())
+        result = run_async_safely(api_client.reset_api_key())
             
         new_api_key = result.get("apiKey", "N/A")
         
@@ -754,7 +1162,18 @@ def validate_rich_note_paragraphs(paragraphs: List[Dict[str, Any]]) -> bool:
                 # 内链笔记节点验证
                 if "note_id" not in para or not isinstance(para["note_id"], str):
                     return False
-            else:
+            elif para_type == "file":
+                # 文件段落验证
+                if "file_type" not in para or para["file_type"] not in ["image", "audio", "pdf"]:
+                    return False
+                if "source_type" not in para or para["source_type"] not in ["local", "url"]:
+                    return False
+                if "source_path" not in para or not isinstance(para["source_path"], str):
+                    return False
+                # metadata是可选的
+                if "metadata" in para and not isinstance(para["metadata"], dict):
+                    return False
+            elif para_type in ["paragraph", "quote"] or "texts" in para:
                 # 文本段落验证（普通段落或引用段落）
                 if "texts" not in para:
                     return False
@@ -768,6 +1187,7 @@ def validate_rich_note_paragraphs(paragraphs: List[Dict[str, Any]]) -> bool:
                         return False
                     if "link" in text and not isinstance(text["link"], str):
                         return False
+            # 如果都不匹配，可能是处理后的文件节点，跳过验证
         return True
     except:
         return False

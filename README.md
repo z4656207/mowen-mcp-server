@@ -4,9 +4,37 @@
 
 本项目由一支烟花社区和墨问合作共创。
 
-**✨ 最新版本特性：统一的富文本接口设计，支持引用段落和内链笔记，所有笔记操作使用一致的参数格式。**
+**✨ 最新版本特性：支持文件上传功能！现在可以在笔记中插入图片、音频和PDF文件，支持本地文件和远程URL两种上传方式。**
 
-## 🆕 新功能预览 (v1.0.1)
+## 🆕 新功能预览 (v0.2.0)
+
+### 📁 文件上传支持
+⚠️ **重要：文件路径必须使用绝对路径**，因为MCP Server和Client运行在不同的工作目录中。
+
+```python
+# 本地图片文件
+{
+    "type": "file",
+    "file_type": "image",
+    "source_type": "local",
+    "source_path": "C:\\Users\\用户名\\Documents\\image.jpg",  # Windows绝对路径
+    "metadata": {
+        "alt": "图片描述",
+        "align": "center"
+    }
+}
+
+# 远程音频文件（URL不受路径限制）
+{
+    "type": "file",
+    "file_type": "audio",
+    "source_type": "url",
+    "source_path": "https://example.com/audio.mp3",
+    "metadata": {
+        "show_note": "00:00 开始\n01:30 主要内容"
+    }
+}
+```
 
 ### 📝 引用段落
 ```python
@@ -33,6 +61,7 @@
 - 🔗 **兼容MCP协议**：支持最新的MCP 1.9.1版本
 - 📝 **创建笔记**：统一的富文本格式，支持段落、加粗、高亮、链接、引用和内链笔记
 - ✏️ **编辑笔记**：统一的富文本格式，完全替换笔记内容
+- 📁 **文件上传**：支持图片、音频、PDF文件上传，本地文件和远程URL两种方式
 - 💬 **引用段落**：创建引用文本块，支持富文本格式
 - 🔗 **内链笔记**：引用其他笔记，创建笔记间的关联
 - 🔒 **隐私设置**：设置笔记的公开、私有或规则公开权限
@@ -142,6 +171,7 @@ MOWEN_API_KEY=你的墨问API密钥
 1. **普通段落**（默认）：`{"texts": [...]}`
 2. **引用段落**：`{"type": "quote", "texts": [...]}`  
 3. **内链笔记**：`{"type": "note", "note_id": "笔记ID"}`
+4. **文件段落**：`{"type": "file", "file_type": "image|audio|pdf", "source_type": "local|url", "source_path": "绝对路径", "metadata": {...}}`
 
 **段落格式示例：**
 ```json
@@ -164,6 +194,16 @@ MOWEN_API_KEY=你的墨问API密钥
   {
     "type": "note",
     "note_id": "VPrWsE_-P0qwrFUOygxxx"
+  },
+  {
+    "type": "file",
+    "file_type": "image",
+    "source_type": "local",
+    "source_path": "C:\\Users\\用户名\\Documents\\image.jpg",
+    "metadata": {
+      "alt": "图片描述",
+      "align": "center"
+    }
   }
 ]
 ```
@@ -186,7 +226,7 @@ MOWEN_API_KEY=你的墨问API密钥
 - `note_id` (字符串，必需)：要编辑的笔记ID
 - `paragraphs` (数组，必需)：富文本段落列表，将完全替换原有内容
 
-**注意：** 此操作会完全替换笔记的原有内容，而不是追加内容。支持所有段落类型（普通段落、引用段落、内链笔记）。
+**注意：** 此操作会完全替换笔记的原有内容，而不是追加内容。支持所有段落类型（普通段落、引用段落、内链笔记、文件段落）。
 
 ### set_note_privacy
 设置笔记的隐私权限
@@ -275,6 +315,57 @@ create_note(
 )
 ```
 
+### 创建包含文件的笔记
+```python
+# 通过MCP工具调用
+create_note(
+    paragraphs=[
+        {
+            "texts": [
+                {"text": "项目截图和演示", "bold": true}
+            ]
+        },
+        {
+            "type": "file",
+            "file_type": "image",
+            "source_type": "local",
+            "source_path": "C:\\Users\\user\\Desktop\\screenshot.png",
+            "metadata": {
+                "alt": "项目主界面截图",
+                "align": "center"
+            }
+        },
+        {
+            "texts": [
+                {"text": "演示视频（音频）："}
+            ]
+        },
+        {
+            "type": "file",
+            "file_type": "audio",
+            "source_type": "url",
+            "source_path": "https://example.com/demo.mp3",
+            "metadata": {
+                "show_note": "00:00 项目介绍\n01:30 功能演示\n03:00 总结"
+            }
+        },
+        {
+            "texts": [
+                {"text": "详细文档见附件："}
+            ]
+        },
+        {
+            "type": "file",
+            "file_type": "pdf",
+            "source_type": "local",
+            "source_path": "C:\\Users\\user\\Documents\\project_doc.pdf"
+        }
+    ],
+    auto_publish=True,
+    tags=["项目", "文档", "演示"]
+)
+```
+
 ### 编辑笔记
 ```python
 # 通过MCP工具调用
@@ -357,6 +448,21 @@ A: 我们统一了接口设计，使用富文本格式可以支持更丰富的�
 
 ### Q: 如何从旧版本的API调用迁移？
 A: 如果之前使用 `create_note(content="文本")`，现在需要改为 `create_note(paragraphs=[{"texts": [{"text": "文本"}]}])`。富文本功能保持不变。
+
+### Q: 文件上传时为什么提示"文件不存在"？
+A: **必须使用绝对路径**。MCP Server和Client运行在不同的工作目录中，相对路径会解析失败。
+- ✅ 正确：`"C:\\Users\\用户名\\Documents\\image.jpg"` (Windows)
+- ✅ 正确：`"/Users/用户名/Documents/image.jpg"` (macOS/Linux)  
+- ❌ 错误：`"./image.jpg"` 或 `"image.jpg"` (相对路径)
+
+### Q: 支持哪些文件类型？
+A: 支持三种文件类型：
+- 图片(image): .gif, .jpeg, .jpg, .png, .webp (最大50MB)
+- 音频(audio): .mp3, .mp4, .m4a (最大200MB)
+- PDF(pdf): .pdf (最大100MB)
+
+### Q: 远程URL文件上传有什么限制？
+A: 远程URL不受路径格式限制，但文件必须公开可访问，且符合文件类型和大小限制。
 
 ## 开发贡献
 

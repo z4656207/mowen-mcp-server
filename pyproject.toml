@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mowen-mcp-server"
-version = "0.1.0"
-description = "墨问笔记API的MCP服务器封装，支持在Cursor、Claude Desktop等MCP客户端中操作墨问笔记"
+version = "0.2.0"
+description = "墨问笔记API的MCP服务器封装，支持在Cursor、Claude Desktop等MCP客户端中操作墨问笔记，包含文件上传功能"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -35,6 +35,7 @@ dependencies = [
     "httpx>=0.25.0",
     "pydantic>=2.0.0",
     "nest-asyncio>=1.5.0",
+    "aiofiles>=23.0.0",
 ]
 
 [project.urls]
