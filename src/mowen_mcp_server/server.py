@@ -342,36 +342,143 @@ def get_file_type_from_extension(file_path: str) -> Optional[str]:
             return file_type
     return None
 
+def normalize_file_path(file_path: str) -> str:
+    """
+    标准化文件路径，处理不同操作系统和客户端传入的路径格式
+    
+    主要处理：
+    1. 正斜杠和反斜杠的统一
+    2. 路径分隔符的标准化
+    3. 相对路径转绝对路径
+    4. 客户端路径前缀异常修复（如多余的@符号）
+    
+    参数:
+    - file_path: 原始文件路径
+    
+    返回: 标准化后的文件路径
+    """
+    if not file_path:
+        return file_path
+    
+    try:
+        # 记录原始路径
+        logger.info(f"🔧 路径标准化 - 原始路径: {repr(file_path)}")
+        
+        # 预处理：检查并修复客户端路径异常
+        cleaned_path = _clean_client_path_anomalies(file_path)
+        if cleaned_path != file_path:
+            logger.info(f"🔧 路径标准化 - 客户端异常修复: {repr(file_path)} -> {repr(cleaned_path)}")
+        
+        # 使用pathlib自动处理路径分隔符
+        # pathlib会自动将正斜杠转换为当前系统的路径分隔符
+        path = Path(cleaned_path)
+        
+        # 如果是相对路径，转换为绝对路径
+        if not path.is_absolute():
+            path = path.resolve()
+            logger.info(f"🔧 路径标准化 - 相对路径转绝对路径: {path}")
+        else:
+            # 即使是绝对路径，也进行resolve()来标准化
+            path = path.resolve()
+        
+        normalized_path = str(path)
+        logger.info(f"🔧 路径标准化 - 最终路径: {repr(normalized_path)}")
+        
+        return normalized_path
+        
+    except Exception as e:
+        logger.warning(f"⚠️ 路径标准化失败: {file_path}, 错误: {str(e)}")
+        # 如果标准化失败，返回原始路径
+        return file_path
+
+def _clean_client_path_anomalies(file_path: str) -> str:
+    """
+    清理客户端传入路径的异常情况
+    
+    处理已知的客户端路径问题：
+    1. 文件名前多余的@符号
+    2. 其他可能的前缀异常
+    
+    参数:
+    - file_path: 原始文件路径
+    
+    返回: 清理后的文件路径
+    """
+    if not file_path:
+        return file_path
+    
+    original_path = file_path
+    
+    # 检查文件名前是否有多余的@符号
+    # 例如: "D:\\@note.png" -> "D:\\note.png"
+    if '@' in file_path:
+        # 分离路径和文件名
+        path_obj = Path(file_path)
+        parent_dir = path_obj.parent
+        filename = path_obj.name
+        
+        # 如果文件名以@开头，尝试移除@
+        if filename.startswith('@'):
+            cleaned_filename = filename[1:]  # 移除第一个@字符
+            cleaned_path = str(parent_dir / cleaned_filename)
+            
+            logger.info(f"🔧 检测到文件名前缀@符号: {repr(filename)} -> {repr(cleaned_filename)}")
+            return cleaned_path
+    
+    # 可以在这里添加其他客户端异常的处理逻辑
+    # 例如：处理其他特殊前缀字符
+    
+    return original_path
+
 def validate_file_path(file_path: str) -> tuple[bool, str]:
     """
     验证文件路径的安全性和有效性
     
-    推荐使用绝对路径，因为MCP Server和Client通常运行在不同的工作目录中。
+    自动处理路径格式兼容性：
+    - 支持正斜杠和反斜杠混用
+    - 自动标准化路径分隔符
+    - 兼容不同客户端的路径格式
+    - 自动修复客户端路径异常（如@前缀）
     
     返回: (是否有效, 错误信息)
     """
     try:
-        path = Path(file_path)
+        # 首先标准化路径
+        normalized_path = normalize_file_path(file_path)
+        path = Path(normalized_path)
         
-        # 推荐使用绝对路径
-        if not path.is_absolute():
-            # 尝试解析相对路径，但给出提示
-            path = path.resolve()
-            if not path.exists():
-                return False, f"文件不存在：{file_path}\n💡 建议使用绝对路径，因为MCP Server和Client可能运行在不同目录中。\n   例如：{path}"
-            else:
-                # 相对路径找到了文件，但仍然建议使用绝对路径
-                logger.warning(f"⚠️ 使用了相对路径 '{file_path}'，建议使用绝对路径 '{path}' 以确保可靠性")
-        else:
-            path = path.resolve()
+        logger.info(f"🔍 文件路径验证 - 标准化路径: {normalized_path}")
         
         # 检查文件是否存在
         if not path.exists():
-            return False, f"文件不存在：{file_path}"
+            # 如果标准化后的路径仍然不存在，尝试额外的修复策略
+            alternative_path = _try_alternative_path_fixes(file_path)
+            if alternative_path and alternative_path != normalized_path:
+                alt_path_obj = Path(alternative_path)
+                if alt_path_obj.exists():
+                    logger.info(f"🔧 使用替代路径修复成功: {alternative_path}")
+                    path = alt_path_obj
+                    normalized_path = alternative_path
+                else:
+                    # 提供详细的错误信息，包括尝试的所有路径
+                    error_msg = f"文件不存在：{file_path}"
+                    if normalized_path != file_path:
+                        error_msg += f"\n标准化后路径：{normalized_path}"
+                    if alternative_path != normalized_path:
+                        error_msg += f"\n尝试的替代路径：{alternative_path}"
+                    error_msg += f"\n💡 请检查：\n  1. 文件路径是否正确\n  2. 文件是否确实存在\n  3. 路径中是否包含特殊字符或异常前缀"
+                    return False, error_msg
+            else:
+                # 提供详细的错误信息
+                error_msg = f"文件不存在：{file_path}"
+                if normalized_path != file_path:
+                    error_msg += f"\n标准化后路径：{normalized_path}"
+                error_msg += f"\n💡 请检查：\n  1. 文件路径是否正确\n  2. 文件是否确实存在\n  3. 路径中是否包含特殊字符或异常前缀"
+                return False, error_msg
         
         # 检查是否为文件
         if not path.is_file():
-            return False, f"路径不是文件：{file_path}"
+            return False, f"路径不是文件：{normalized_path}"
         
         # 检查文件类型
         file_type = get_file_type_from_extension(str(path))
@@ -386,10 +493,49 @@ def validate_file_path(file_path: str) -> tuple[bool, str]:
             size_mb = size_limit // (1024 * 1024)
             return False, f"文件过大。{file_type}类型文件最大支持{size_mb}MB"
         
+        logger.info(f"✅ 文件路径验证通过: {normalized_path}")
         return True, ""
         
     except Exception as e:
-        return False, f"文件路径验证失败：{str(e)}"
+        error_msg = f"文件路径验证失败：{str(e)}"
+        if file_path != normalize_file_path(file_path):
+            error_msg += f"\n原始路径：{file_path}\n标准化路径：{normalize_file_path(file_path)}"
+        return False, error_msg
+
+def _try_alternative_path_fixes(file_path: str) -> Optional[str]:
+    """
+    尝试额外的路径修复策略
+    
+    当标准化路径仍然无效时，尝试其他可能的修复方法：
+    1. 直接移除文件名前的@符号（不通过标准化）
+    2. 其他可能的客户端异常修复
+    
+    参数:
+    - file_path: 原始文件路径
+    
+    返回: 修复后的路径，如果无法修复则返回None
+    """
+    if not file_path:
+        return None
+    
+    # 策略1：直接检查原始路径中的@符号问题
+    if '@' in file_path:
+        # 尝试移除文件名中的@符号
+        path_obj = Path(file_path)
+        parent_dir = path_obj.parent
+        filename = path_obj.name
+        
+        if filename.startswith('@'):
+            # 移除@前缀
+            cleaned_filename = filename[1:]
+            alternative_path = str(parent_dir / cleaned_filename)
+            logger.info(f"🔧 尝试替代路径修复 - 移除@前缀: {repr(file_path)} -> {repr(alternative_path)}")
+            return alternative_path
+    
+    # 可以在这里添加其他修复策略
+    # 例如：处理其他已知的客户端异常模式
+    
+    return None
 
 async def process_file_upload(file_info: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -420,16 +566,20 @@ async def process_file_upload(file_info: Dict[str, Any]) -> Dict[str, Any]:
             if not is_valid:
                 raise ValueError(error_msg)
             
-            file_path = Path(source_path)
+            # 使用标准化后的路径进行文件操作
+            normalized_path = normalize_file_path(source_path)
+            file_path = Path(normalized_path)
             file_name = file_path.name
             file_type_code = FILE_TYPE_MAP[file_type]
+            
+            logger.info(f"📁 使用标准化路径进行文件上传: {normalized_path}")
             
             # 获取上传授权
             api_client = get_mowen_api()
             auth_result = await api_client.get_upload_auth(file_type_code, file_name)
             
-            # 执行文件上传
-            upload_result = await api_client.upload_file_local(auth_result, source_path)
+            # 执行文件上传（使用标准化路径）
+            upload_result = await api_client.upload_file_local(auth_result, normalized_path)
             file_id = upload_result["file"]["fileId"]
             logger.info(f"✅ 文件上传成功，获得文件ID: {file_id}")
             
@@ -582,10 +732,17 @@ def create_note(
         - 音频: show_note(ShowNote内容)
         - PDF: 无需额外metadata
         
-        ⚠️ 重要提示 - 文件路径要求：
-        - 必须使用绝对路径，且保证路径完全正确
-        - Windows示例: "C:\\Users\\用户名\\Documents\\image.jpg"
-        - macOS/Linux示例: "/Users/用户名/Documents/image.jpg"
+        📁 文件路径说明：
+        - 支持绝对路径和相对路径（推荐使用绝对路径）
+        - 自动兼容不同操作系统的路径格式：
+          * Windows反斜杠: "C:\\Users\\用户名\\Documents\\image.jpg"
+          * 正斜杠格式: "C:/Users/用户名/Documents/image.jpg"  
+          * macOS/Linux: "/Users/用户名/Documents/image.jpg"
+          * 混合格式: "C:/Users\\用户名/Documents\\image.jpg"
+        - 智能路径修复功能：
+          * 自动移除文件名前的异常@符号: "D:\\@note.png" -> "D:\\note.png"
+          * 自动标准化路径格式，跨平台兼容
+          * 多重修复策略确保路径正确性
         
         如果只是简单文本，可以这样使用：
         [
