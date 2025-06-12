@@ -1118,10 +1118,10 @@ def edit_note(
             
             if para_type == "note":
                 # 内链笔记节点
-                note_id = para_data.get("note_id")
-                if not note_id:
+                internal_note_id = para_data.get("note_id")
+                if not internal_note_id:
                     raise ValueError("内链笔记节点必须提供note_id参数")
-                paragraphs_built.append(NoteAtomBuilder.create_note(note_id))
+                paragraphs_built.append(NoteAtomBuilder.create_note(internal_note_id))
             elif para_type in ["image", "audio", "pdf"]:
                 # 文件节点（已经通过process_paragraphs_with_files处理过）
                 paragraphs_built.append(para_data)
