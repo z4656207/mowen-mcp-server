@@ -38,6 +38,15 @@ logger = logging.getLogger("mowen-mcp-server")
 # 创建FastMCP服务器实例
 mcp = FastMCP("墨问笔记MCP服务器")
 
+class MowenAPIError(Exception):
+    """墨问API异常类"""
+    def __init__(self, status_code: int, reason: str = "", message: str = "", response_text: str = ""):
+        self.status_code = status_code
+        self.reason = reason
+        self.message = message
+        self.response_text = response_text
+        super().__init__(f"API调用失败 [{status_code}] {reason}: {message}")
+
 class MowenAPI:
     """墨问API客户端类，封装所有API调用"""
     
@@ -48,6 +57,109 @@ class MowenAPI:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
+    
+    def _handle_response(self, response: httpx.Response, operation: str = "API调用") -> Dict[str, Any]:
+        """
+        统一处理HTTP响应，实现细粒度的错误处理
+        
+        参数:
+        - response: HTTP响应对象
+        - operation: 操作描述，用于日志记录
+        
+        返回: 解析后的JSON数据
+        
+        异常: 
+        - MowenAPIError: API调用失败时抛出
+        - Exception: 网络错误等其他异常直接抛出
+        """
+        status_code = response.status_code
+        response_text = response.text
+        
+        # 记录响应基本信息
+        logger.info(f"📥 {operation} - HTTP状态码: {status_code}")
+        logger.debug(f"📥 {operation} - 响应内容: {response_text}")
+        
+        # 2XX 成功响应
+        if 200 <= status_code < 300:
+            try:
+                return response.json()
+            except Exception as e:
+                logger.error(f"❌ {operation} - JSON解析失败: {str(e)}")
+                logger.error(f"📄 原始响应内容: {response_text}")
+                raise Exception(f"响应JSON解析失败: {str(e)}")
+        
+        # 解析错误响应的详细信息
+        error_detail = self._parse_error_response(response_text)
+        reason = error_detail.get("reason", "UNKNOWN")
+        message = error_detail.get("message", "未知错误")
+        
+        # 4XX 客户端错误 - 详细记录但不直接抛异常
+        if 400 <= status_code < 500:
+            logger.warning(f"⚠️ {operation} - 客户端错误 [{status_code}]")
+            logger.warning(f"🔍 错误原因: {reason}")
+            logger.warning(f"📝 错误信息: {message}")
+            logger.warning(f"📄 完整响应: {response_text}")
+            
+            # 根据墨问API文档中的错误码进行分类处理
+            if reason == "LOGIN":
+                logger.error("🔑 认证失败 - 请检查API密钥是否正确或已过期")
+            elif reason == "PARAMS":
+                logger.error("📋 参数错误 - 请检查请求参数格式和内容")
+            elif reason == "PERM":
+                logger.error("🚫 权限不足 - 无法访问该资源")
+            elif reason == "NOT_FOUND":
+                logger.error("🔍 资源未找到 - 请检查资源ID是否正确")
+            elif reason == "RATELIMIT":
+                logger.error("⏰ 请求频率限制 - 请稍后重试")
+            elif reason == "RISKY":
+                logger.error("⚠️ 风险请求 - 请求被安全策略拦截")
+            elif reason == "BLOCKED":
+                logger.error("🚫 账户被封禁 - 请联系客服")
+            elif reason == "Quota":
+                logger.error("📊 配额不足 - 已达到API调用限制")
+            
+            # 抛出自定义异常，包含详细信息
+            raise MowenAPIError(status_code, reason, message, response_text)
+        
+        # 5XX 服务器错误 - 记录并抛异常
+        elif 500 <= status_code < 600:
+            logger.error(f"❌ {operation} - 服务器错误 [{status_code}]")
+            logger.error(f"🔍 错误原因: {reason}")
+            logger.error(f"📝 错误信息: {message}")
+            logger.error(f"📄 完整响应: {response_text}")
+            raise MowenAPIError(status_code, reason, message, response_text)
+        
+        # 其他状态码
+        else:
+            logger.error(f"❌ {operation} - 未知状态码 [{status_code}]")
+            logger.error(f"📄 响应内容: {response_text}")
+            raise MowenAPIError(status_code, "UNKNOWN", f"未知状态码: {status_code}", response_text)
+    
+    def _parse_error_response(self, response_text: str) -> Dict[str, Any]:
+        """
+        解析错误响应，提取错误详情
+        
+        参数:
+        - response_text: 响应文本
+        
+        返回: 包含错误信息的字典
+        """
+        try:
+            error_json = json.loads(response_text)
+            return {
+                "code": error_json.get("code", 0),
+                "reason": error_json.get("reason", "UNKNOWN"),
+                "message": error_json.get("message", "未知错误"),
+                "metadata": error_json.get("metadata", {})
+            }
+        except Exception:
+            # JSON解析失败，返回基本信息
+            return {
+                "code": 0,
+                "reason": "PARSE_ERROR",
+                "message": "无法解析错误响应",
+                "metadata": {}
+            }
     
     async def create_note(self, body: Dict[str, Any], settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -63,7 +175,6 @@ class MowenAPI:
             payload["settings"] = settings
         
         # 记录完整的API调用参数
-        import json
         logger.info(f"📤 墨问API创建笔记请求:")
         logger.info(f"URL: {url}")
         logger.info(f"Headers: {self.headers}")
@@ -71,10 +182,7 @@ class MowenAPI:
             
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=self.headers, json=payload)
-            logger.info(f"📥 墨问API响应状态: {response.status_code}")
-            logger.info(f"📥 墨问API响应内容: {response.text}")
-            response.raise_for_status()
-            return response.json()
+            return self._handle_response(response, "创建笔记")
     
     async def edit_note(self, note_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -90,10 +198,11 @@ class MowenAPI:
             "body": body
         }
         
+        logger.info(f"📤 墨问API编辑笔记请求: {note_id}")
+        
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=self.headers, json=payload)
-            response.raise_for_status()
-            return response.json()
+            return self._handle_response(response, "编辑笔记")
     
     async def set_note_privacy(self, note_id: str, privacy_type: str, rule: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -117,19 +226,21 @@ class MowenAPI:
             }
         }
         
+        logger.info(f"📤 墨问API设置笔记隐私请求: {note_id}")
+        
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=self.headers, json=payload)
-            response.raise_for_status()
-            return response.json()
+            return self._handle_response(response, "设置笔记隐私")
     
     async def reset_api_key(self) -> Dict[str, Any]:
         """重置API密钥"""
         url = urljoin(self.base_url, "/api/open/api/v1/auth/key/reset")
         
+        logger.info(f"📤 墨问API重置密钥请求")
+        
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=self.headers, json={})
-            response.raise_for_status()
-            return response.json()
+            return self._handle_response(response, "重置API密钥")
     
     async def get_upload_auth(self, file_type: int, file_name: str) -> Dict[str, Any]:
         """
@@ -145,10 +256,11 @@ class MowenAPI:
             "fileName": file_name
         }
         
+        logger.info(f"📤 墨问API获取上传授权请求: {file_name}")
+        
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=self.headers, json=payload)
-            response.raise_for_status()
-            return response.json()
+            return self._handle_response(response, "获取上传授权")
     
     async def upload_file_local(self, auth_info: Dict[str, Any], file_path: str) -> Dict[str, Any]:
         """
@@ -170,10 +282,11 @@ class MowenAPI:
         files = {"file": (Path(file_path).name, file_content)}
         data = {k: v for k, v in form_data.items() if k != "file"}
         
+        logger.info(f"📤 文件上传到端点: {endpoint}")
+        
         async with httpx.AsyncClient(timeout=300.0) as client:  # 增加超时时间
             response = await client.post(endpoint, data=data, files=files)
-            response.raise_for_status()
-            return response.json()
+            return self._handle_response(response, "本地文件上传")
     
     async def upload_file_url(self, file_type: int, url: str, file_name: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -191,11 +304,12 @@ class MowenAPI:
         }
         if file_name:
             payload["fileName"] = file_name
+        
+        logger.info(f"📤 墨问API远程文件上传请求: {url}")
             
         async with httpx.AsyncClient(timeout=300.0) as client:  # 增加超时时间
             response = await client.post(api_url, headers=self.headers, json=payload)
-            response.raise_for_status()
-            return response.json()
+            return self._handle_response(response, "远程文件上传")
 
 class NoteAtomBuilder:
     """NoteAtom结构构建器，帮助构建符合墨问格式的笔记内容"""
@@ -910,7 +1024,6 @@ def create_note(
         }
         
         # 记录最终发送给墨问的完整数据结构
-        import json
         logger.info(f"🏗️ 最终构建的笔记结构:")
         logger.info(f"Body: {json.dumps(body, indent=2, ensure_ascii=False)}")
         logger.info(f"Settings: {json.dumps(settings, indent=2, ensure_ascii=False)}")
@@ -926,14 +1039,9 @@ def create_note(
         result = run_async_safely(api_client.create_note(body, settings))
             
         return f"✅ 笔记创建成功！\n\n笔记ID: {result.get('noteId', 'N/A')}\n段落数: {len(paragraphs_built)}\n自动发布: {auto_publish}\n标签: {', '.join(tags)}"
-    except httpx.HTTPStatusError as e:
-        error_detail = ""
-        try:
-            error_json = e.response.json()
-            error_detail = f"\n错误代码: {error_json.get('code', 'N/A')}\n错误原因: {error_json.get('reason', 'N/A')}\n错误信息: {error_json.get('message', 'N/A')}"
-        except:
-            error_detail = f"\nHTTP状态码: {e.response.status_code}"
-            
+    except MowenAPIError as e:
+        # 墨问API特定错误，已经有详细日志记录
+        error_detail = f"\n错误代码: {e.status_code}\n错误原因: {e.reason}\n错误信息: {e.message}"
         return f"❌ API调用失败: {str(e)}{error_detail}"
     except Exception as e:
         import traceback
@@ -1157,14 +1265,9 @@ def edit_note(
         result = run_async_safely(api_client.edit_note(note_id, body))
             
         return f"✅ 笔记编辑成功！\n\n笔记ID: {result.get('noteId', note_id)}\n段落数: {len(paragraphs_built)}"
-    except httpx.HTTPStatusError as e:
-        error_detail = ""
-        try:
-            error_json = e.response.json()
-            error_detail = f"\n错误代码: {error_json.get('code', 'N/A')}\n错误原因: {error_json.get('reason', 'N/A')}\n错误信息: {error_json.get('message', 'N/A')}"
-        except:
-            error_detail = f"\nHTTP状态码: {e.response.status_code}"
-            
+    except MowenAPIError as e:
+        # 墨问API特定错误，已经有详细日志记录
+        error_detail = f"\n错误代码: {e.status_code}\n错误原因: {e.reason}\n错误信息: {e.message}"
         return f"❌ API调用失败: {str(e)}{error_detail}"
     except Exception as e:
         return f"❌ 发生错误: {str(e)}"
@@ -1252,14 +1355,9 @@ def set_note_privacy(
                 response_text += f"\n过期时间戳: {expire_time}"
                 
         return response_text
-    except httpx.HTTPStatusError as e:
-        error_detail = ""
-        try:
-            error_json = e.response.json()
-            error_detail = f"\n错误代码: {error_json.get('code', 'N/A')}\n错误原因: {error_json.get('reason', 'N/A')}\n错误信息: {error_json.get('message', 'N/A')}"
-        except:
-            error_detail = f"\nHTTP状态码: {e.response.status_code}"
-            
+    except MowenAPIError as e:
+        # 墨问API特定错误，已经有详细日志记录
+        error_detail = f"\n错误代码: {e.status_code}\n错误原因: {e.reason}\n错误信息: {e.message}"
         return f"❌ API调用失败: {str(e)}{error_detail}"
     except Exception as e:
         return f"❌ 发生错误: {str(e)}"
@@ -1296,14 +1394,9 @@ def reset_api_key() -> str:
         new_api_key = result.get("apiKey", "N/A")
         
         return f"⚠️ API密钥重置成功！\n\n新的API密钥: {new_api_key}\n\n重要提醒：\n1. 请立即保存新的API密钥\n2. 旧的API密钥已立即失效\n3. 需要更新您的应用配置"
-    except httpx.HTTPStatusError as e:
-        error_detail = ""
-        try:
-            error_json = e.response.json()
-            error_detail = f"\n错误代码: {error_json.get('code', 'N/A')}\n错误原因: {error_json.get('reason', 'N/A')}\n错误信息: {error_json.get('message', 'N/A')}"
-        except:
-            error_detail = f"\nHTTP状态码: {e.response.status_code}"
-            
+    except MowenAPIError as e:
+        # 墨问API特定错误，已经有详细日志记录
+        error_detail = f"\n错误代码: {e.status_code}\n错误原因: {e.reason}\n错误信息: {e.message}"
         return f"❌ API调用失败: {str(e)}{error_detail}"
     except Exception as e:
         return f"❌ 发生错误: {str(e)}"
