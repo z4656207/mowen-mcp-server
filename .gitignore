@@ -163,7 +163,6 @@ temp/
 *.spec
 
 # PyInstaller临时文件
-/build/
 /dist/
 
 # 平台特定文件
