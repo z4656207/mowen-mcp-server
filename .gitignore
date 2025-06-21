@@ -8,7 +8,6 @@ __pycache__/
 
 # Distribution / packaging
 .Python
-build/
 develop-eggs/
 dist/
 downloads/
@@ -156,4 +155,17 @@ logs/
 
 # 临时文件
 tmp/
-temp/ 
+temp/
+
+# 构建输出
+/release/
+/build/__pycache__/
+*.spec
+
+# PyInstaller临时文件
+/build/
+/dist/
+
+# 平台特定文件
+.DS_Store
+Thumbs.db
