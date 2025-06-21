@@ -1457,7 +1457,7 @@ def main():
     logger.info("墨问API客户端初始化完成")
     
     # 启动服务器
-    logger.info("正在启动墨问MCP服务器...")
+    logger.info("正在启动墨问MCP服务社区版...")
     mcp.run()
 
 if __name__ == "__main__":
