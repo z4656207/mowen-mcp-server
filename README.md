@@ -4,6 +4,26 @@
 
 本项目由一支烟花社区和墨问合作共创。
 
+## 🆕 免安装版上线了（小白可用）
+
+### 使用方法（windows为例）
+
+1. 下载mowen-mcp-server-windows-x64-v1.0.0.zip并解压出mowen-mcp-server.exe
+2. mcp客户端中修改command值，替换成mowen-mcp-server.exe文件的路径即可
+```json
+{
+  "mcpServers": {
+    "mowen-mcp-server": {
+      "command": "D:\\mowen\\mowen-mcp-server.exe",
+      "args": [],
+      "env": {
+        "MOWEN_API_KEY": "xxxxxxxxxxxxxxx"
+      }
+    }
+  }
+}
+```
+
 **✨ 最新版本特性：支持文件上传功能！现在可以在笔记中插入图片、音频和PDF文件，支持本地文件和远程URL两种上传方式。**
 
 ## 🆕 新功能预览 (v0.2.0)
@@ -481,4 +501,4 @@ A: 远程URL不受路径格式限制，但文件必须公开可访问，且符�
 
 ## 免责声明
 
-本项目为个人开发的第三方工具，与墨问官方无关。使用前请确保遵守墨问的服务条款。 
+本项目为个人开发的第三方工具，与墨问官方无关。使用前请确保遵守墨问的服务条款。
